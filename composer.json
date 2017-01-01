@@ -1,0 +1,9 @@
+{
+    "require": {
+        "monolog/monolog": "^1.22",
+        "fabpot/goutte": "^3.2"
+    },
+    "autoload": {
+        "psr-4": {"crawler\\": "src/"}
+    }
+}
