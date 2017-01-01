@@ -16,7 +16,14 @@ $configs = [
     ],
     'entry_urls' => [
         'http://www.u88.cn/',
-        'http://www.canyin668.com'
+        'http://www.canyin668.com/'
+    ],
+    'list_url_regexes' => [
+        "http://www.u88.cn/\.*",
+        "http://www.canyin668.com/\.*"
+    ],
+    'content_url_regexes' => [
+
     ]
 ];
 

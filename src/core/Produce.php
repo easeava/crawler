@@ -80,21 +80,24 @@ class Produce
     protected function crawler()
     {
         while ($queue_lsize = $this->queue_lsize()) {
-            Log::debug('haha');
             if (self::$master) {
                 // 如果开启多进程
                 if (self::$work_num > 1 && !self::$process) {
                     // 如果队列里的任务两倍于进程数时, 生成子进程
                     if ($queue_lsize > self::$work_num * 2) {
-                        self::$process = true;
                         $this->child_process();
                     }
                 }
+                Log::debug('=========master size: '.$queue_lsize);
 
                 // 爬取页面
                 $this->crawler_page();
             } else {
-
+                if ($queue_lsize > self::$work_num * 2) {
+                    $this->crawler_page();
+                } else {
+                    sleep(1);
+                }
             }
         }
     }
@@ -103,44 +106,237 @@ class Produce
     protected function crawler_page()
     {
         $get_crawler_url_num = $this->get_crawler_url_num();
-        log::info("Find pages: {$get_crawler_url_num} ");
+        Log::info("Find pages: {$get_crawler_url_num} ");
 
         $queue_lsize = $this->queue_lsize();
-        log::info("Waiting for collect pages: {$queue_lsize} ");
+        Log::info("Waiting for collect pages: {$queue_lsize} ");
 
         $get_crawlered_url_num = $this->get_crawlered_url_num();
-        log::info("Collected pages: {$get_crawlered_url_num} ");
+        Log::info("Collected pages: {$get_crawlered_url_num} ");
 
         // 先进先出
-        $link   =   $this->queue_rpop();
-        $link   =   $this->link_decompression($link);
-        $url    =   $link['url'];
+        $link = $this->queue_rpop();
+        $link = $this->link_decompression($link);
+        $url = $link['url'];
 
         $this->incr_crawlered_url_num();
+//        var_dump(self::$master);
+        if (self::$master) {
 
-        $client     =   new Client();
-        $crawler    =   $client->request($link['method'], $url);
-        $crawler->filterXPath('//a/@href')->each(function ($node) {
-            if ($node->text()) {
-                echo $node->text();
-//                $this->queue_lpush($node->text());
+            Log::debug('======Master: '.$url);
+        $client = new Client();
+        $crawler = $client->request($link['method'], $url);
+        $data = [];
+        $crawler->filterXPath('//a/@href')->each(function ($node) use (&$data) {
+            $data[] = $node->text();
+        });
+
+        foreach ($data as $key => $url) {
+            $urls[$key] = str_replace(array("\"", "'", '&amp;'), array("", '', '&'), $url);
+        }
+
+        $urls = array_unique($data);
+
+        foreach ($urls as $k => $url) {
+            $url = trim($url);
+            if (empty($url)) {
+                continue;
+            }
+
+            $val = $this->fill_url($url, $link['url']);
+            if ($val) {
+                $urls[$k] = $val;
+            } else {
+                unset($urls[$k]);
+            }
+        }
+
+        if (empty($urls)) {
+            return false;
+        }
+//        var_dump($urls);
+        //--------------------------------------------------------------------------------
+        // 把抓取到的URL放入队列
+        //--------------------------------------------------------------------------------
+        foreach ($urls as $url) {
+
+            // 把当前页当做找到的url的Referer页
+            $options = array(
+                'headers' => array(
+                    'Referer' => $link['url'],
+                )
+            );
+            $this->add_url($url, $options, $link['depth']);
+        }
+        }
+    }
+
+
+    public function set_child()
+    {
+        self::$master   =   false;
+        self::$process  =   true;
+    }
+
+    protected function child_process()
+    {
+        $configs = self::$configs;
+        for ($i = 0; $i < self::$work_num; $i++) {
+            $process = new \swoole_process(function($worker) use($configs) {
+                $child = new Produce($configs);
+                $child->set_child();
+                $child->run();
+            });
+            $process->start();
+        }
+
+        \swoole_process::signal(SIGCHLD, function($sig) {
+            //必须为false，非阻塞模式
+            while($ret =  \swoole_process::wait(false)) {
+                echo "PID={$ret['pid']}结束\n";
             }
         });
     }
 
 
-    protected function child_process()
+    /**
+     * 获得完整的连接地址
+     *
+     * @param mixed $url            要检查的URL
+     * @param mixed $collect_url    从那个URL页面得到上面的URL
+     * @return void
+     * @author seatle <seatle@foxmail.com>
+     * @created time :2016-09-23 17:13
+     */
+    public function fill_url($url, $collect_url)
     {
-        self::$taskmaster = false;
+        $url = trim($url);
+        $collect_url = trim($collect_url);
 
-        for ($i = 0; $i < self::$work_num; $i++) {
-            $process = new swoole_process(function($worker) {
-                Log::debug('haha');
-            });
-            echo $process;
+        // 排除JavaScript的连接
+        //if (strpos($url, "javascript:") !== false)
+        if( preg_match("@^(javascript:|#|'|\")@i", $url) || $url == '')
+        {
+            return false;
         }
-    }
+        // 排除没有被解析成功的语言标签
+        if(substr($url, 0, 3) == '<%=')
+        {
+            return false;
+        }
 
+        $parse_url = @parse_url($collect_url);
+        if (empty($parse_url['scheme']) || empty($parse_url['host']))
+        {
+            return false;
+        }
+        // 过滤mailto、tel、sms、wechat、sinaweibo、weixin等协议
+        if (!in_array($parse_url['scheme'], array("http", "https")))
+        {
+            return false;
+        }
+        $scheme = $parse_url['scheme'];
+        $domain = $parse_url['host'];
+        $path = empty($parse_url['path']) ? '' : $parse_url['path'];
+        $base_url_path = $domain.$path;
+        $base_url_path = preg_replace("/\/([^\/]*)\.(.*)$/","/",$base_url_path);
+        $base_url_path = preg_replace("/\/$/",'',$base_url_path);
+
+        $i = $path_step = 0;
+        $dstr = $pstr = '';
+        $pos = strpos($url,'#');
+        if($pos > 0)
+        {
+            // 去掉#和后面的字符串
+            $url = substr($url, 0, $pos);
+        }
+
+        // 京东变态的都是 //www.jd.com/111.html
+        if(substr($url, 0, 2) == '//')
+        {
+            $url = str_replace("//", "", $url);
+        }
+        // /1234.html
+        elseif($url[0] == '/')
+        {
+            $url = $domain.$url;
+        }
+        // ./1234.html、../1234.html 这种类型的
+        elseif($url[0] == '.')
+        {
+            if(!isset($url[2]))
+            {
+                return false;
+            }
+            else
+            {
+                $urls = explode('/',$url);
+                foreach($urls as $u)
+                {
+                    if( $u == '..' )
+                    {
+                        $path_step++;
+                    }
+                    // 遇到 ., 不知道为什么不直接写$u == '.', 貌似一样的
+                    else if( $i < count($urls)-1 )
+                    {
+                        //$dstr .= $urls[$i].'/';
+                    }
+                    else
+                    {
+                        $dstr .= $urls[$i];
+                    }
+                    $i++;
+                }
+                $urls = explode('/',$base_url_path);
+                if(count($urls) <= $path_step)
+                {
+                    return false;
+                }
+                else
+                {
+                    $pstr = '';
+                    for($i=0;$i<count($urls)-$path_step;$i++){ $pstr .= $urls[$i].'/'; }
+                    $url = $pstr.$dstr;
+                }
+            }
+        }
+        else
+        {
+            if( strtolower(substr($url, 0, 7))=='http://' )
+            {
+                $url = preg_replace('#^http://#i','',$url);
+                $scheme = "http";
+            }
+            else if( strtolower(substr($url, 0, 8))=='https://' )
+            {
+                $url = preg_replace('#^https://#i','',$url);
+                $scheme = "https";
+            }
+            else
+            {
+                $url = $base_url_path.'/'.$url;
+            }
+        }
+        // 两个 / 或以上的替换成一个 /
+        $url = preg_replace('@/{1,}@i', '/', $url);
+        $url = $scheme.'://'.$url;
+        //echo $url;exit("\n");
+
+        $parse_url = @parse_url($url);
+        $domain = empty($parse_url['host']) ? $domain : $parse_url['host'];
+        // 如果host不为空, 判断是不是要爬取的域名
+        if (!empty($parse_url['host']))
+        {
+            //排除非域名下的url以提高爬取速度
+            if (!in_array($parse_url['host'], self::$configs['domains']))
+            {
+                return false;
+            }
+        }
+
+        return $url;
+    }
 
     public function set_entry_url($url, $option = [], $allow_repeat = false)
     {
@@ -173,6 +369,47 @@ class Produce
         return $status;
     }
 
+
+    public function add_url($url, $options = array(), $depth = 0)
+    {
+        // 投递状态
+        $status = false;
+
+        $link = $options;
+        $link['url'] = $url;
+        $link['depth'] = $depth;
+        $link = $this->link_decompression($link);
+
+        if ($this->is_list_page($url))
+        {
+            $link['url_type'] = 'list_page';
+            $status = $this->queue_lpush($link);
+        }
+
+        if ($this->is_content_page($url))
+        {
+            $link['url_type'] = 'content_page';
+            $status = $this->queue_lpush($link);
+        }
+
+        if ($status)
+        {
+            if ($link['url_type'] == 'scan_page')
+            {
+                Log::debug("Find scan page: {$url}");
+            }
+            elseif ($link['url_type'] == 'list_page')
+            {
+                Log::debug("Find list page: {$url}");
+            }
+            elseif ($link['url_type'] == 'content_page')
+            {
+                Log::debug("Find content page: {$url}");
+            }
+        }
+
+        return $status;
+    }
 
     /**
      * 是否入口页面
