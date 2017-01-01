@@ -6,7 +6,7 @@ class Log
 {
     public static $log_show = false;
     public static $log_type = false;
-    public static $log_file = SRC_PATH . DIRECTORY_SEPARATOR . "crawler.log";
+    public static $log_file = SRC_PATH . DIRECTORY_SEPARATOR . "logs/crawler.log";
     public static $out_sta = "";
     public static $out_end = "";
 
