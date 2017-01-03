@@ -25,8 +25,7 @@ class Log
     public static function warn($msg)
     {
         self::$out_sta = self::$out_end = "";
-        if (!util::is_win())
-        {
+        if (!util::is_win()) {
             self::$out_sta = "\033[33m";
             self::$out_end = "\033[0m";
         }
@@ -37,8 +36,7 @@ class Log
     public static function debug($msg)
     {
         self::$out_sta = self::$out_end = "";
-        if (!util::is_win())
-        {
+        if (!util::is_win()) {
             self::$out_sta = "\033[36m";
             self::$out_end = "\033[0m";
         }
@@ -49,8 +47,7 @@ class Log
     public static function error($msg)
     {
         self::$out_sta = self::$out_end = "";
-        if (!util::is_win())
-        {
+        if (!util::is_win()) {
             self::$out_sta = "\033[31m";
             self::$out_end = "\033[0m";
         }
@@ -60,21 +57,17 @@ class Log
 
     public static function msg($msg, $log_type)
     {
-        if ($log_type != 'note' && self::$log_type && strpos(self::$log_type, $log_type) === false)
-        {
+        if ($log_type != 'note' && self::$log_type && strpos(self::$log_type, $log_type) === false) {
             return false;
         }
 
-        if ($log_type == 'note')
-        {
+        if ($log_type == 'note') {
             $msg = self::$out_sta. $msg . "\n".self::$out_end;
-        }
-        else
-        {
+        } else {
             $msg = self::$out_sta.date("Y-m-d H:i:s")." [{$log_type}] " . $msg .self::$out_end. "\n";
         }
-        if(self::$log_show)
-        {
+
+        if(self::$log_show) {
             echo $msg;
         }
         file_put_contents(self::$log_file, $msg, FILE_APPEND | LOCK_EX);
@@ -88,12 +81,11 @@ class Log
      */
     public static function add($msg, $log_type = '')
     {
-        if ($log_type != '')
-        {
+        if ($log_type != '') {
             $msg = date("Y-m-d H:i:s")." [{$log_type}] " . $msg . "\n";
         }
-        if(self::$log_show)
-        {
+        
+        if(self::$log_show) {
             echo $msg;
         }
         //file_put_contents(PATH_DATA."/log/".strtolower($log_type).".log", $msg, FILE_APPEND | LOCK_EX);

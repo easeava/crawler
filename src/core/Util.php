@@ -22,8 +22,6 @@ class Util
      * @param mixed $lock_name
      * @param int $lock_timeout
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-02-18 14:28
      */
     public static function lock($lock_name, $lock_timeout = 600)
     {
@@ -109,8 +107,6 @@ class Util
      *
      * @param mixed $filepath
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-03-31 21:54
      */
     public static function get_file_line($filepath)
     {
@@ -135,8 +131,6 @@ class Util
      * @param mixed $item_value     唯一索引
      * @param int $table_num        表数量
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2015-10-22 23:25
      */
     public static function get_table_num($item_value, $table_num = 100)
     {
@@ -156,8 +150,6 @@ class Util
      * @param mixed $item_value     唯一索引
      * @param int $table_num        表数量
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2015-10-22 23:25
      */
     public static function get_table_name($table_name, $item_value, $table_num = 100)
     {
@@ -213,8 +205,6 @@ class Util
      *
      * @param int $num
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-09-18 10:17
      */
     public static function rand_num($num = 7)
     {
@@ -231,8 +221,6 @@ class Util
      *
      * @param int $num
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-09-18 10:17
      */
     public static function rand_str($num = 10)
     {
@@ -320,8 +308,6 @@ class Util
      *
      * @param mixed $s0
      * @return char
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-09-18 10:17
      */
     public static function letter_first($s0)
     {
@@ -361,8 +347,6 @@ class Util
      *
      * @param mixed $day
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-09-18 10:17
      */
     public static function getxtime($day)
     {
@@ -450,8 +434,6 @@ class Util
      *
      * @param mixed $dir
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-09-18 10:17
      */
     public static function deldir($dir)
     {
@@ -537,8 +519,6 @@ class Util
      *
      * @param mixed $data
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-07-29 11:32
      */
     public static function format_csv($data)
     {

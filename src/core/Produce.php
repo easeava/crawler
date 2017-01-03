@@ -205,8 +205,6 @@ class Produce
      * @param mixed $url            要检查的URL
      * @param mixed $collect_url    从那个URL页面得到上面的URL
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-09-23 17:13
      */
     public function fill_url($url, $collect_url)
     {
@@ -216,25 +214,20 @@ class Produce
         // 排除JavaScript的连接
         //if (strpos($url, "javascript:") !== false)
         if( preg_match("@^(javascript:|#|'|\")@i", $url) || $url == '')
-        {
             return false;
-        }
+
         // 排除没有被解析成功的语言标签
         if(substr($url, 0, 3) == '<%=')
-        {
             return false;
-        }
 
         $parse_url = @parse_url($collect_url);
         if (empty($parse_url['scheme']) || empty($parse_url['host']))
-        {
             return false;
-        }
+
         // 过滤mailto、tel、sms、wechat、sinaweibo、weixin等协议
         if (!in_array($parse_url['scheme'], array("http", "https")))
-        {
             return false;
-        }
+
         $scheme = $parse_url['scheme'];
         $domain = $parse_url['host'];
         $path = empty($parse_url['path']) ? '' : $parse_url['path'];
@@ -245,76 +238,53 @@ class Produce
         $i = $path_step = 0;
         $dstr = $pstr = '';
         $pos = strpos($url,'#');
-        if($pos > 0)
-        {
+        if($pos > 0) {
             // 去掉#和后面的字符串
             $url = substr($url, 0, $pos);
         }
 
         // 京东变态的都是 //www.jd.com/111.html
-        if(substr($url, 0, 2) == '//')
-        {
+        if(substr($url, 0, 2) == '//') {
             $url = str_replace("//", "", $url);
-        }
-        // /1234.html
-        elseif($url[0] == '/')
-        {
+        } elseif($url[0] == '/') {
+            // /1234.html
             $url = $domain.$url;
-        }
-        // ./1234.html、../1234.html 这种类型的
-        elseif($url[0] == '.')
-        {
-            if(!isset($url[2]))
-            {
+        } elseif ($url[0] == '.') {
+            // ./1234.html、../1234.html 这种类型的
+            if(!isset($url[2])) {
                 return false;
-            }
-            else
-            {
+            } else {
                 $urls = explode('/',$url);
-                foreach($urls as $u)
-                {
-                    if( $u == '..' )
-                    {
+                foreach($urls as $u) {
+                    if( $u == '..' ) {
                         $path_step++;
-                    }
-                    // 遇到 ., 不知道为什么不直接写$u == '.', 貌似一样的
-                    else if( $i < count($urls)-1 )
-                    {
+                    } else if($i < count($urls)-1) {
+                        // 遇到 ., 不知道为什么不直接写$u == '.', 貌似一样的
                         //$dstr .= $urls[$i].'/';
-                    }
-                    else
-                    {
+                    } else {
                         $dstr .= $urls[$i];
                     }
+
                     $i++;
                 }
+
                 $urls = explode('/',$base_url_path);
-                if(count($urls) <= $path_step)
-                {
+                if(count($urls) <= $path_step) {
                     return false;
-                }
-                else
-                {
+                } else {
                     $pstr = '';
                     for($i=0;$i<count($urls)-$path_step;$i++){ $pstr .= $urls[$i].'/'; }
                     $url = $pstr.$dstr;
                 }
             }
-        }
-        else
-        {
-            if( strtolower(substr($url, 0, 7))=='http://' )
-            {
+        } else {
+            if( strtolower(substr($url, 0, 7))=='http://' ) {
                 $url = preg_replace('#^http://#i','',$url);
                 $scheme = "http";
-            }
-            else if( strtolower(substr($url, 0, 8))=='https://' )
-            {
+            } else if( strtolower(substr($url, 0, 8))=='https://' ) {
                 $url = preg_replace('#^https://#i','',$url);
                 $scheme = "https";
-            }
-            else
-            {
+            } else {
                 $url = $base_url_path.'/'.$url;
             }
         }
@@ -326,11 +296,9 @@ class Produce
         $parse_url = @parse_url($url);
         $domain = empty($parse_url['host']) ? $domain : $parse_url['host'];
         // 如果host不为空, 判断是不是要爬取的域名
-        if (!empty($parse_url['host']))
-        {
+        if (!empty($parse_url['host'])) {
             //排除非域名下的url以提高爬取速度
-            if (!in_array($parse_url['host'], self::$configs['domains']))
-            {
+            if (!in_array($parse_url['host'], self::$configs['domains'])) {
                 return false;
             }
         }
@@ -358,7 +326,7 @@ class Produce
         }
 
         if ($status) {
-            if ($link['url_type'] == 'scan_page')
+            if ($link['url_type'] == 'entry_page')
                 Log::debug("Find scan page: {$url}");
             elseif ($link['url_type'] == 'list_page')
                 Log::debug("Find list page: {$url}");
@@ -380,36 +348,29 @@ class Produce
         $link['depth'] = $depth;
         $link = $this->link_decompression($link);
 
-        if ($this->is_list_page($url))
-        {
+        if ($this->is_list_page($url)) {
             $link['url_type'] = 'list_page';
             $status = $this->queue_lpush($link);
         }
 
-        if ($this->is_content_page($url))
-        {
+        if ($this->is_content_page($url)) {
             $link['url_type'] = 'content_page';
             $status = $this->queue_lpush($link);
         }
 
-        if ($status)
-        {
-            if ($link['url_type'] == 'scan_page')
-            {
+        if ($status) {
+            if ($link['url_type'] == 'entry_page') {
                 Log::debug("Find scan page: {$url}");
-            }
-            elseif ($link['url_type'] == 'list_page')
-            {
+            } elseif ($link['url_type'] == 'list_page') {
                 Log::debug("Find list page: {$url}");
-            }
-            elseif ($link['url_type'] == 'content_page')
-            {
+            } elseif ($link['url_type'] == 'content_page') {
                 Log::debug("Find content page: {$url}");
             }
         }
 
         return $status;
     }
+
 
     /**
      * 是否入口页面
@@ -649,12 +610,9 @@ class Produce
     {
         $lock = "lock-depth_num";
         // 锁2秒
-        if (Queue::lock($lock, time(), 2))
-        {
-            if (Queue::get("depth_num") < $depth)
-            {
+        if (Queue::lock($lock, time(), 2)) {
+            if (Queue::get("depth_num") < $depth) 
                 Queue::set("depth_num", $depth);
-            }
 
             Queue::unlock($lock);
         }
@@ -690,8 +648,6 @@ class Produce
      *
      * @param mixed $url
      * @return void
-     * @author seatle <seatle@foxmail.com>
-     * @created time :2016-09-23 17:13
      */
     public function get_crawlered_url_num()
     {
