@@ -6,26 +6,37 @@ require '../vendor/autoload.php';
 require './configs/configs.php';
 
 $configs = [
-    'name'      => 'u88',
-    'work_num'  => 10,
+    'name'      => 'u88a',
+    'work_num'  => 5,
+    'max_depth' =>  1,
+    'dbname'    =>  'test',
     'domains'   => [
         'u88.cn',
         'www.u88.cn',
-        'canyin668.com',
-        'www.canyin668.com'
     ],
     'entry_urls' => [
         'http://www.u88.cn/',
-        'http://www.canyin668.com/'
     ],
     'list_url_regexes' => [
         "http://www.u88.cn/\.*",
-        "http://www.canyin668.com/\.*"
     ],
     'content_url_regexes' => [
 
+    ],
+    'fields'    =>  [
+        [
+            'selector'  =>  '',
+            'name'      =>  []
+        ],
+        [
+            'selector'  =>  '',
+            ''
+        ]
     ]
 ];
 
 $craw = new \crawler\core\Produce($configs);
+// $craw->download_html = function($aa) {
+//     return 1;
+// } 
 $craw->run();

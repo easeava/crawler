@@ -37,6 +37,11 @@ class Produce
     protected static $depth_num     =   0;
     protected static $crawlered_urls_num    =   0;
     protected static $crawler_urls_num      =   0;
+    protected $client;
+    protected static $pid           =   0;
+    protected static $child         =   [];
+    // 下载完页面
+    public $download_html;
 
 
     public function __construct($configs = [])
@@ -62,6 +67,8 @@ class Produce
             $GLOBALS['config']['redis']['prefix'] = $GLOBALS['config']['redis']['prefix'].'-'.md5($configs['name']);
 
         self::$configs      =   $configs;
+        $this->client       =   new Client();
+        // self::$pid          =   posix_getpid();
     }
 
     public function run()
@@ -85,10 +92,12 @@ class Produce
                 if (self::$work_num > 1 && !self::$process) {
                     // 如果队列里的任务两倍于进程数时, 生成子进程
                     if ($queue_lsize > self::$work_num * 2) {
-                        $this->child_process();
+                        for ($i = 0; $i < self::$work_num; $i++) {
+                            $this->child_process();
+                        }
                     }
                 }
-                Log::debug('=========master size: '.$queue_lsize);
+                Log::debug(self::$pid.'=========master size: '.$queue_lsize . '===============');
 
                 // 爬取页面
                 $this->crawler_page();
@@ -120,12 +129,73 @@ class Produce
         $url = $link['url'];
 
         $this->incr_crawlered_url_num();
-//        var_dump(self::$master);
-        if (self::$master) {
 
-            Log::debug('======Master: '.$url);
-        $client = new Client();
-        $crawler = $client->request($link['method'], $url);
+        $this->request($url, $link);
+    }
+
+
+    protected function request($url, $link)
+    {
+        $method = empty($link['method']) ? 'get' : strtolower($link['method']);
+        $params = empty($link['params']) ? array() : $link['params'];
+
+        $crawler = $this->client->request($method, $url);
+
+        // $html = '';
+
+        // if (method_exists(object, method_name)) {
+        //     $html = 
+        // }
+
+        file_put_contents(md5($url).'.html', '1');
+
+        if (self::$configs['max_depth'] == 0 || $link['depth'] < self::$configs['max_depth']) {
+            $d = $link['depth'];
+            $d++;
+            $this->get_urls($crawler, $url, $d);
+        }
+    }
+
+
+    public function set_child()
+    {
+        self::$master   =   false;
+        self::$process  =   true;
+    }
+
+    protected function child_process()
+    {
+        $configs = self::$configs;
+        $process = new \swoole_process(function($worker) use($configs) {
+            $child = new Produce($configs);
+            $child->set_child();
+            $child->run();
+        });
+        self::$child[] = $pid = $process->start();
+
+        \swoole_process::signal(SIGCHLD, function($sig) use($configs) {
+            //必须为false，非阻塞模式
+            while (true) {
+                while($ret =  \swoole_process::wait(false)) {
+                    echo "PID={$ret['pid']}结束\n";
+                    if ($key = array_search($ret['pid'], self::$child)) {
+                        $queue_lsize = $this->queue_lsize();
+                        if ($queue_lsize > self::$work_num * 2) {
+                            $pid = $this->child_process();
+
+                            echo "拉起".$pid.'\n';
+                        }
+                    }
+                }
+            }
+        });
+
+        return $pid;
+    }
+
+
+    protected function get_urls($crawler, string $collect_url, $depth = 0) 
+    {
         $data = [];
         $crawler->filterXPath('//a/@href')->each(function ($node) use (&$data) {
             $data[] = $node->text();
@@ -143,7 +213,7 @@ class Produce
                 continue;
             }
 
-            $val = $this->fill_url($url, $link['url']);
+            $val = $this->fill_url($url, $collect_url);
             if ($val) {
                 $urls[$k] = $val;
             } else {
@@ -163,39 +233,12 @@ class Produce
             // 把当前页当做找到的url的Referer页
             $options = array(
                 'headers' => array(
-                    'Referer' => $link['url'],
+                    'Referer' => $collect_url,
                 )
             );
-            $this->add_url($url, $options, $link['depth']);
+
+            $this->add_url($url, $options, $depth);
         }
-        }
-    }
-
-
-    public function set_child()
-    {
-        self::$master   =   false;
-        self::$process  =   true;
-    }
-
-    protected function child_process()
-    {
-        $configs = self::$configs;
-        for ($i = 0; $i < self::$work_num; $i++) {
-            $process = new \swoole_process(function($worker) use($configs) {
-                $child = new Produce($configs);
-                $child->set_child();
-                $child->run();
-            });
-            $process->start();
-        }
-
-        \swoole_process::signal(SIGCHLD, function($sig) {
-            //必须为false，非阻塞模式
-            while($ret =  \swoole_process::wait(false)) {
-                echo "PID={$ret['pid']}结束\n";
-            }
-        });
     }
 
 
@@ -296,7 +339,7 @@ class Produce
         $parse_url = @parse_url($url);
         $domain = empty($parse_url['host']) ? $domain : $parse_url['host'];
         // 如果host不为空, 判断是不是要爬取的域名
-        if (!empty($parse_url['host'])) {
+        if (isset($parse_url['host'])) {
             //排除非域名下的url以提高爬取速度
             if (!in_array($parse_url['host'], self::$configs['domains'])) {
                 return false;
@@ -327,18 +370,18 @@ class Produce
 
         if ($status) {
             if ($link['url_type'] == 'entry_page')
-                Log::debug("Find scan page: {$url}");
+                Log::debug(self::$pid."Find scan page: {$url}");
             elseif ($link['url_type'] == 'list_page')
-                Log::debug("Find list page: {$url}");
+                Log::debug(self::$pid."Find list page: {$url}");
             elseif ($link['url_type'] == 'content_page')
-                Log::debug("Find content page: {$url}");
+                Log::debug(self::$pid."Find content page: {$url}");
         }
 
         return $status;
     }
 
 
-    public function add_url($url, $options = array(), $depth = 0)
+    public function add_url($url, $options = [], $depth = 0)
     {
         // 投递状态
         $status = false;
@@ -360,11 +403,11 @@ class Produce
 
         if ($status) {
             if ($link['url_type'] == 'entry_page') {
-                Log::debug("Find scan page: {$url}");
+                Log::debug(self::$pid."Find scan page: {$url}");
             } elseif ($link['url_type'] == 'list_page') {
-                Log::debug("Find list page: {$url}");
+                Log::debug(self::$pid."Find list page: {$url}");
             } elseif ($link['url_type'] == 'content_page') {
-                Log::debug("Find content page: {$url}");
+                Log::debug(self::$pid."Find content page: {$url}");
             }
         }
 
