@@ -1,9 +1,10 @@
-<?php
+<?php 
+
 namespace crawler\core;
 
 use Goutte\Client;
 
-class Produce
+class Crawler 
 {
 
     /**
@@ -29,24 +30,25 @@ class Produce
     const AGENT_IOS     =   "Mozilla/5.0 (iPhone; CPU iPhone OS 9_3_3 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13G34 Safari/601.1";
     const AGENT_ANDROID =   "Mozilla/5.0 (Linux; U; Android 6.0.1;zh_cn; Le X820 Build/FEXCNFN5801507014S) AppleWebKit/537.36 (KHTML, like Gecko)Version/4.0 Chrome/49.0.0.0 Mobile Safari/537.36 EUI Browser/5.8.015S";
 
-    protected static $master        =   true;
-    protected static $process       =   false;
-    protected static $work_num      =   1;
+   
+	protected static $work_num = 5;
+	protected static $pid  = 0;
+	protected static $master = true;
+	protected static $process = false;
+	protected static $child_master = false;
+	protected static $child = false;
     protected static $queue_lists   =   [];
     protected static $configs       =   [];
     protected static $depth_num     =   0;
     protected static $crawlered_urls_num    =   0;
     protected static $crawler_urls_num      =   0;
-    protected $client;
-    protected static $pid           =   0;
-    protected static $child         =   [];
-    // 下载完页面
-    public $download_html;
-
-
-    public function __construct($configs = [])
-    {
-        $configs['name']        =   $configs['name'] ?? 'crawler' ;
+ 	public static $crawler_succ 	= 	0;
+    public static $crawler_fail 	= 	0;
+    protected static $child_pid		=	[];
+    protected static $time_start 	=	0;
+	public function __construct($configs) 
+	{
+		$configs['name']        =   $configs['name'] ?? 'crawler' ;
 
         $configs['name']        =   isset($configs['name'])        ? $configs['name']        : 'phpspider';
         $configs['proxy']       =   isset($configs['proxy'])       ? $configs['proxy']       : '';
@@ -69,47 +71,86 @@ class Produce
         self::$configs      =   $configs;
         $this->client       =   new Client();
         // self::$pid          =   posix_getpid();
-    }
+	}
 
-    public function run()
-    {
-        // 添加入口URL到队列
-        foreach (self::$configs['entry_urls'] as $url)
-        {
-            // false 表示不允许重复
-            $this->set_entry_url($url, null, false);
+
+	public function run($worker = false)
+	{
+
+        if (!empty(self::$configs['entry_urls'])) {
+	        // 添加入口URL到队列
+	        foreach (self::$configs['entry_urls'] as $url) {
+	            // false 表示不允许重复
+	            $this->set_entry_url($url, null, false);
+	        }
+        } else {
+        	return false;
         }
+		
+		$this->start($worker);
+	}
 
-        $this->crawler();
-    }
+
+	protected function start($worker)
+	{
+		while (true) {
+			// var_dump(self::$master);
+			$queue_lsize = $this->queue_lsize();
+			if (self::$master && !self::$process && $queue_lsize > self::$work_num * 2) {
+				echo 'with if master: '.$this->get_pid().PHP_EOL;
+				self::$process = true;
+				for ($i=0; $i < self::$work_num; $i++) { 
+					$this->process();
+				}
+
+				// $child_pid =& self::$child_pid;
+				\swoole_process::signal(SIGCHLD, function($sig){
+				  	while($ret = swoole_process::wait(false)) {
+				      	echo "退出PID={$ret['pid']}\n";
+				      	// if ($key = array_search($ret['pid'], $child_pid)) {
+				      	// 	unset($child_pid[$key]);
+	          //               $queue_lsize = $this->queue_lsize();
+	          //               if ($queue_lsize > self::$work_num * 2) {
+	          //                   $child_pid[] = $pid = $this->process();
+	          //                   echo "拉起".$pid.'\n';
+	          //               }
+	          //           }
+				  	}
+				});
+			}
+			// sleep(1);
+			
+			// if (self::$child && !$queue_lsize) 
+			// 	$worker->exit(0);
 
 
-    protected function crawler()
-    {
-        while ($queue_lsize = $this->queue_lsize()) {
-            if (self::$master) {
-                // 如果开启多进程
-                if (self::$work_num > 1 && !self::$process) {
-                    // 如果队列里的任务两倍于进程数时, 生成子进程
-                    if ($queue_lsize > self::$work_num * 2) {
-                        for ($i = 0; $i < self::$work_num; $i++) {
-                            $this->child_process();
-                        }
-                    }
-                }
-                Log::debug(self::$pid.'=========master size: '.$queue_lsize . '===============');
+			if ($queue_lsize) {
+				$this->crawler_page();
+			}
 
-                // 爬取页面
-                $this->crawler_page();
-            } else {
-                if ($queue_lsize > self::$work_num * 2) {
-                    $this->crawler_page();
-                } else {
-                    sleep(1);
-                }
-            }
-        }
-    }
+			// sleep(1);
+		}
+	}
+
+	protected function process()
+	{
+		$process = new \swoole_process(function($work) {
+			self::$master 	= 	false;
+			self::$child 	=	true;
+			$this->run($work);
+		});
+
+		$pid = $process->start();
+
+		return $pid;
+	}
+
+	public function get_pid()
+	{
+		self::$pid = posix_getpid();
+		return self::$pid;
+	}
+
 
 
     protected function crawler_page()
@@ -127,132 +168,287 @@ class Produce
         $link = $this->queue_rpop();
         $link = $this->link_decompression($link);
         $url = $link['url'];
-
+        // var_dump($link);
         $this->incr_crawlered_url_num();
 
-        $this->request($url, $link);
+        $page_time_start = microtime(true);
+
+        Requests::$input_encoding = null;
+        $html = $this->request_url($url, $link);
+        // echo $html;
+         // 当前正在爬取的网页页面的对象
+        $page = array(
+            'url'     => $url,
+            'raw'     => $html,
+            'request' => array(
+                'url'          => $url,
+                'method'       => $link['method'],
+                'headers'      => $link['headers'],
+                'params'       => $link['params'],
+                'context_data' => $link['context_data'],
+                'try_num'      => $link['try_num'],
+                'max_try'      => $link['max_try'],
+                'depth'        => $link['depth'],
+                // 'taskid'       => self::$taskid,
+            ),
+        );
+        unset($html);
+
+        // 如果深度没有超过最大深度, 获取下一级URL
+        if (self::$configs['max_depth'] == 0 || $link['depth'] < self::$configs['max_depth']) 
+        {
+            // 分析提取HTML页面中的URL
+            $this->get_urls($page['raw'], $url, $link['depth'] + 1);
+        }
+
+        // 如果当前深度大于缓存的, 更新缓存
+        $this->incr_depth_num($link['depth']);
+
+        // 处理页面耗时时间
+        $time_run = round(microtime(true) - $page_time_start, 3);
+        log::debug("Success process page {$url} in {$time_run} s");
+
+        $spider_time_run = util::time2second(intval(microtime(true) - self::$time_start));
+        log::info("Spider running in {$spider_time_run}");
+
+        // 爬虫爬取每个网页的时间间隔, 单位: 毫秒
+        if (!isset(self::$configs['interval'])) 
+        {
+            // 默认睡眠100毫秒, 太快了会被认为是ddos
+            self::$configs['interval'] = 100;
+        }
+        usleep(self::$configs['interval'] * 1000);
     }
 
 
-    protected function request($url, $link)
+    /**
+     * 下载网页, 得到网页内容
+     * 
+     * @param mixed $url
+     * @param mixed $link
+     * @return void
+     */
+    public function request_url($url, $link = array())
     {
+        $time_start = microtime(true);
+
+        //$url = "http://www.qiushibaike.com/article/117568316";
+
+        // 设置了编码就不要让requests去判断了
+        if (isset(self::$configs['input_encoding'])) 
+        {
+            Requests::$input_encoding = self::$configs['input_encoding'];
+        }
+        // 得到的编码如果不是utf-8的要转成utf-8, 因为xpath只支持utf-8
+        Requests::$output_encoding = 'utf-8';
+        Requests::set_timeout(self::$configs['timeout']);
+        Requests::set_useragent(self::$configs['user_agent']);
+        if (self::$configs['user_agents']) 
+        {
+            Requests::set_useragents(self::$configs['user_agents']);
+        }
+        if (self::$configs['client_ip']) 
+        {
+            Requests::set_client_ip(self::$configs['client_ip']);
+        }
+        if (self::$configs['client_ips']) 
+        {
+            Requests::set_client_ips(self::$configs['client_ips']);
+        }
+
+        // 是否设置了代理
+        if (!empty($link['proxy'])) 
+        {
+            Requests::set_proxies(array('http'=>$link['proxy'], 'https'=>$link['proxy']));
+            // 自动切换IP
+            Requests::set_header('Proxy-Switch-Ip', 'yes');
+        }
+
+        // 如何设置了 HTTP Headers
+        if (!empty($link['headers'])) 
+        {
+            foreach ($link['headers'] as $k=>$v) 
+            {
+                Requests::set_header($k, $v);
+            }
+        }
+
         $method = empty($link['method']) ? 'get' : strtolower($link['method']);
         $params = empty($link['params']) ? array() : $link['params'];
+        $html = Requests::$method($url, $params);
+        // 此url附加的数据不为空, 比如内容页需要列表页一些数据, 拼接到后面去
+        if ($html && !empty($link['context_data'])) 
+        {
+            $html .= $link['context_data'];
+        }
 
-        $crawler = $this->client->request($method, $url);
+        $http_code = Requests::$status_code;
 
-        // $html = '';
-
-        // if (method_exists(object, method_name)) {
-        //     $html = 
+        // if ($this->on_status_code) 
+        // {
+        //     $return = call_user_func($this->on_status_code, $http_code, $url, $html, $this);
+        //     if (isset($return)) 
+        //     {
+        //         $html = $return;
+        //     }
+        //     if (!$html) 
+        //     {
+        //         return false;
+        //     }
         // }
 
-        file_put_contents(md5($url).'.html', '1');
-
-        if (self::$configs['max_depth'] == 0 || $link['depth'] < self::$configs['max_depth']) {
-            $d = $link['depth'];
-            $d++;
-            $this->get_urls($crawler, $url, $d);
-        }
-    }
-
-
-    public function set_child()
-    {
-        self::$master   =   false;
-        self::$process  =   true;
-    }
-
-    protected function child_process()
-    {
-        $configs = self::$configs;
-        $process = new \swoole_process(function($worker) use($configs) {
-            $child = new Produce($configs);
-            $child->set_child();
-            $child->run();
-        });
-        self::$child[] = $pid = $process->start();
-
-        \swoole_process::signal(SIGCHLD, function($sig) use($configs) {
-            //必须为false，非阻塞模式
-            while (true) {
-                while($ret =  \swoole_process::wait(false)) {
-                    echo "PID={$ret['pid']}结束\n";
-                    if ($key = array_search($ret['pid'], self::$child)) {
-                        $queue_lsize = $this->queue_lsize();
-                        if ($queue_lsize > self::$work_num * 2) {
-                            $pid = $this->child_process();
-
-                            echo "拉起".$pid.'\n';
-                        }
+        if ($http_code != 200)
+        {
+            // 如果是301、302跳转, 抓取跳转后的网页内容
+            if ($http_code == 301 || $http_code == 302) 
+            {
+                $info = Requests::$info;
+                if (isset($info['redirect_url'])) 
+                {
+                    $url = $info['redirect_url'];
+                    Requests::$input_encoding = null;
+                    $html = $this->request_url($url, $link);
+                    if ($html && !empty($link['context_data'])) 
+                    {
+                        $html .= $link['context_data'];
                     }
                 }
+                else 
+                {
+                    return false;
+                }
             }
-        });
-
-        return $pid;
-    }
-
-
-    protected function get_urls($crawler, string $collect_url, $depth = 0) 
-    {
-        $data = [];
-        $crawler->filterXPath('//a/@href')->each(function ($node) use (&$data) {
-            $data[] = $node->text();
-        });
-
-        foreach ($data as $key => $url) {
-            $urls[$key] = str_replace(array("\"", "'", '&amp;'), array("", '', '&'), $url);
+            else 
+            {
+                if ($http_code == 407) 
+                {
+                    // 扔到队列头部去, 继续采集
+                    $this->queue_rpush($link);
+                    Log::error("Failed to download page {$url}");
+                    self::$crawler_fail++;
+                }
+                elseif (in_array($http_code, array('0','502','503','429'))) 
+                {
+                    // 采集次数加一
+                    $link['try_num']++;
+                    // 抓取次数 小于 允许抓取失败次数
+                    if ( $link['try_num'] <= $link['max_try'] ) 
+                    {
+                        // 扔到队列头部去, 继续采集
+                        $this->queue_rpush($link);
+                    }
+                    Log::error("Failed to download page {$url}, retry({$link['try_num']})");
+                }
+                else 
+                {
+                    Log::error("Failed to download page {$url}");
+                    self::$crawler_fail++;
+                }
+                Log::error("HTTP CODE: {$http_code}");
+                return false;
+            }
         }
 
-        $urls = array_unique($data);
+        // 爬取页面耗时时间
+        $time_run = round(microtime(true) - $time_start, 3);
+        Log::debug("Success download page {$url} in {$time_run} s");
+        // self::$crawler_succ++;
 
-        foreach ($urls as $k => $url) {
+        return $html;
+    }
+
+    /**
+     * 分析提取HTML页面中的URL
+     * 
+     * @param mixed $html           HTML内容
+     * @param mixed $crawler_url    抓取的URL, 用来拼凑完整页面的URL
+     * @return void
+     */
+    public function get_urls($html, $crawler_url, $depth = 0) 
+    { 
+        //--------------------------------------------------------------------------------
+        // 正则匹配出页面中的URL
+        //--------------------------------------------------------------------------------
+        $urls = selector::select($html, '//a/@href');             
+        //preg_match_all("/<a.*href=[\"']{0,1}(.*)[\"']{0,1}[> \r\n\t]{1,}/isU", $html, $matchs); 
+        //$urls = array();
+        //if (!empty($matchs[1])) 
+        //{
+        //foreach ($matchs[1] as $url) 
+        //{
+        //$urls[] = str_replace(array("\"", "'",'&amp;'), array("",'','&'), $url);
+        //}
+        //}
+
+        if (empty($urls)) 
+        {
+            return false;
+        }
+
+        foreach ($urls as $key=>$url) 
+        {
+            $urls[$key] = str_replace(array("\"", "'",'&amp;'), array("",'','&'), $url);
+        }
+
+        //--------------------------------------------------------------------------------
+        // 过滤和拼凑URL
+        //--------------------------------------------------------------------------------
+        // 去除重复的RUL
+        $urls = array_unique($urls);
+        foreach ($urls as $k=>$url) 
+        {
             $url = trim($url);
-            if (empty($url)) {
+            if (empty($url)) 
+            {
                 continue;
             }
 
-            $val = $this->fill_url($url, $collect_url);
-            if ($val) {
+            $val = $this->fill_url($url, $crawler_url);
+            if ($val) 
+            {
                 $urls[$k] = $val;
-            } else {
+            }
+            else 
+            {
                 unset($urls[$k]);
             }
         }
 
-        if (empty($urls)) {
+        if (empty($urls)) 
+        {
             return false;
         }
-//        var_dump($urls);
+
         //--------------------------------------------------------------------------------
         // 把抓取到的URL放入队列
         //--------------------------------------------------------------------------------
-        foreach ($urls as $url) {
+        foreach ($urls as $url) 
+        {
 
             // 把当前页当做找到的url的Referer页
             $options = array(
                 'headers' => array(
-                    'Referer' => $collect_url,
+                    'Referer' => $crawler_url,
                 )
             );
-
             $this->add_url($url, $options, $depth);
         }
     }
+
+
 
 
     /**
      * 获得完整的连接地址
      *
      * @param mixed $url            要检查的URL
-     * @param mixed $collect_url    从那个URL页面得到上面的URL
+     * @param mixed $crawler_url    从那个URL页面得到上面的URL
      * @return void
      */
-    public function fill_url($url, $collect_url)
+    public function fill_url($url, $crawler_url)
     {
         $url = trim($url);
-        $collect_url = trim($collect_url);
+        $crawler_url = trim($crawler_url);
 
         // 排除JavaScript的连接
         //if (strpos($url, "javascript:") !== false)
@@ -263,7 +459,7 @@ class Produce
         if(substr($url, 0, 3) == '<%=')
             return false;
 
-        $parse_url = @parse_url($collect_url);
+        $parse_url = @parse_url($crawler_url);
         if (empty($parse_url['scheme']) || empty($parse_url['host']))
             return false;
 
@@ -708,6 +904,5 @@ class Produce
     {
         Queue::incr("crawlered_urls_num");
     }
-
 
 }

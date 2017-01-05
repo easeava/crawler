@@ -7,7 +7,7 @@ require './configs/configs.php';
 
 $configs = [
     'name'      => 'u88a',
-    'work_num'  => 5,
+    'work_num'  => 20,
     'max_depth' =>  1,
     'dbname'    =>  'test',
     'domains'   => [
@@ -35,7 +35,7 @@ $configs = [
     ]
 ];
 
-$craw = new \crawler\core\Produce($configs);
+$craw = new \crawler\core\Crawler($configs);
 // $craw->download_html = function($aa) {
 //     return 1;
 // } 
