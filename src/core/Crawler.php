@@ -7,6 +7,8 @@ use Goutte\Client;
 class Crawler 
 {
 
+	const VERSION = 0.1;
+
     /**
      * 爬虫爬取每个网页的时间间隔,0表示不延时, 单位: 毫秒
      */
@@ -30,13 +32,17 @@ class Crawler
     const AGENT_IOS     =   "Mozilla/5.0 (iPhone; CPU iPhone OS 9_3_3 like Mac OS X) AppleWebKit/601.1.46 (KHTML, like Gecko) Version/9.0 Mobile/13G34 Safari/601.1";
     const AGENT_ANDROID =   "Mozilla/5.0 (Linux; U; Android 6.0.1;zh_cn; Le X820 Build/FEXCNFN5801507014S) AppleWebKit/537.36 (KHTML, like Gecko)Version/4.0 Chrome/49.0.0.0 Mobile Safari/537.36 EUI Browser/5.8.015S";
 
-   
-	protected static $work_num = 5;
-	protected static $pid  = 0;
-	protected static $master = true;
-	protected static $process = false;
-	protected static $child_master = false;
-	protected static $child = false;
+    public static $serverid = 1;
+    public static $multiserver = false;
+    public static $terminate = false;
+
+   	protected static $daemonize		=	false;
+	protected static $worker_num 		= 	5;
+	protected static $pid  			= 	0;
+	protected static $master 		= 	true;
+	protected static $process 		= 	false;
+	protected static $child_master 	= 	false;
+	protected static $child 		= 	false;
     protected static $queue_lists   =   [];
     protected static $configs       =   [];
     protected static $depth_num     =   0;
@@ -46,11 +52,41 @@ class Crawler
     public static $crawler_fail 	= 	0;
     protected static $child_pid		=	[];
     protected static $time_start 	=	0;
+    protected static $task_id		=	0;
+
+    // 导出类型配置
+    public static $export_type 		= 	'';
+    public static $export_file 		= 	'';
+    public static $export_conf 		= 	'';
+    public static $export_table 	= 	'';
+    public static $export_db_config = 	'';
+
+    // 网页返回状态码
+    public $request_status_code		=	null;
+    public $html_download_page		= 	null;
+    public $html_entry_page			=	null;
+    public $html_list_page			=	null;
+    public $html_content_page		=	null;
+    public $html_download_attached_page	=	null;
+    public $html_handle_img			=	null;
+    public $html_extract_field		=	null;
+    public $html_extract_page		=	null;
+
+
+    // 运行面板参数长度
+    public static $server_length 		= 	10;
+    public static $worker_num_length 	= 	8;
+    public static $taskid_length 		= 	8;
+    public static $pid_length 			= 	8;
+    public static $mem_length 			= 	8;
+    public static $urls_length 			= 	15;
+    public static $speed_length 		= 	6;
+
 	public function __construct($configs) 
 	{
 		$configs['name']        =   $configs['name'] ?? 'crawler' ;
 
-        $configs['name']        =   isset($configs['name'])        ? $configs['name']        : 'phpspider';
+        $configs['name']        =   isset($configs['name'])        ? $configs['name']        : 'crawler';
         $configs['proxy']       =   isset($configs['proxy'])       ? $configs['proxy']       : '';
         $configs['user_agent']  =   isset($configs['user_agent'])  ? $configs['user_agent']  : self::AGENT_PC;
         $configs['user_agents'] =   isset($configs['user_agents']) ? $configs['user_agents'] : null;
@@ -63,23 +99,39 @@ class Crawler
         $configs['max_fields']  =   isset($configs['max_fields'])  ? $configs['max_fields']  : 0;
         $configs['export']      =   isset($configs['export'])      ? $configs['export']      : [];
 
-        self::$work_num     =   $configs['work_num'] ?? self::$work_num;
+        self::$daemonize      	=   isset($configs['daemonize']) ? $configs['daemonize'] ?? false : false;
+
+        self::$worker_num     	=   $configs['worker_num'] ?? self::$worker_num;
 
         if (isset($GLOBALS['config']['redis']['prefix']))
             $GLOBALS['config']['redis']['prefix'] = $GLOBALS['config']['redis']['prefix'].'-'.md5($configs['name']);
 
         self::$configs      =   $configs;
-        $this->client       =   new Client();
+        // $this->client       =   new Client();
         // self::$pid          =   posix_getpid();
         
+        // csv、sql、db
+        self::$export_type  = isset($configs['export']['type'])  ? $configs['export']['type']  : '';
+        self::$export_file  = isset($configs['export']['file'])  ? $configs['export']['file']  : '';
+        self::$export_table = isset($configs['export']['table']) ? $configs['export']['table'] : '';
+        self::$export_db_config = isset($configs['export']['config']) ? $configs['export']['config'] : $GLOBALS['config']['db'];
+
         if (isset($configs['log_file'])) {
         	Log::$log_file = SRC_PATH . DIRECTORY_SEPARATOR . "logs/{$configs["log_file"]}.log";
         }
 	}
 
 
-	public function run($worker = false)
+	public function run()
 	{
+		// 爬虫开始时间
+        self::$time_start = time();
+
+        $this->check_export();
+
+        $this->check_cache();
+
+        // $this->init_redis();
 
         if (!empty(self::$configs['entry_urls'])) {
 	        // 添加入口URL到队列
@@ -90,21 +142,32 @@ class Crawler
         } else {
         	return false;
         }
-		
-		$this->start($worker);
+
+        if (self::$daemonize) {
+        	$this->daemonize();
+        } else {
+        	$this->display_ui();
+        }
+
+		$this->start();
 	}
 
 
-	protected function start($worker)
+	protected function start($worker = null)
 	{
+		// echo self::$task_id;
+		// echo $this->get_pid();
+		self::$crawler_succ = 0;
+        self::$crawler_fail = 0;
+
 		while (true) {
 			// var_dump(self::$master);
 			$queue_lsize = $this->queue_lsize();
-			if (self::$master && !self::$process && $queue_lsize > self::$work_num * 2) {
-				echo 'with if master: '.$this->get_pid().PHP_EOL;
+			if (self::$master && !self::$process && $queue_lsize > self::$worker_num * 2) {
+				// echo 'with if master: '.$this->get_pid().PHP_EOL;
 				self::$process = true;
-				for ($i=0; $i < self::$work_num; $i++) { 
-					$this->process();
+				for ($i=0; $i < self::$worker_num; $i++) { 
+					$this->process($i+1);
 				}
 
 				// $child_pid =& self::$child_pid;
@@ -114,7 +177,7 @@ class Crawler
 				      	// if ($key = array_search($ret['pid'], $child_pid)) {
 				      	// 	unset($child_pid[$key]);
 	          //               $queue_lsize = $this->queue_lsize();
-	          //               if ($queue_lsize > self::$work_num * 2) {
+	          //               if ($queue_lsize > self::$worker_num * 2) {
 	          //                   $child_pid[] = $pid = $this->process();
 	          //                   echo "拉起".$pid.'\n';
 	          //               }
@@ -132,16 +195,36 @@ class Crawler
 				$this->crawler_page();
 			}
 
+			$this->set_task_status();
 			// sleep(1);
+			
+			if (self::$master && !self::$daemonize) {
+                $this->display_ui();
+			}
 		}
 	}
 
-	protected function process()
+
+    public function init_redis()
+    {
+        // 添加当前服务器到服务器列表
+        $this->add_server_list(self::$serverid, self::$worker_num);
+
+        // 删除当前服务器的任务状态
+        // 对于被强制退出的进程有用
+        for ($i = 1; $i <= self::$worker_num; $i++) {
+            $this->del_task_status(self::$serverid, $i);
+        }
+    }
+
+
+	protected function process($taskid)
 	{
-		$process = new \swoole_process(function($work) {
+		$process = new \swoole_process(function($work) use($taskid) {
 			self::$master 	= 	false;
 			self::$child 	=	true;
-			$this->run($work);
+			self::$task_id	=	$taskid;
+			$this->start($work);
 		});
 
 		$pid = $process->start();
@@ -163,17 +246,16 @@ class Crawler
         Log::info("Find pages: {$get_crawler_url_num} ");
 
         $queue_lsize = $this->queue_lsize();
-        Log::info("Waiting for collect pages: {$queue_lsize} ");
+        Log::info("Waiting for crawler pages: {$queue_lsize} ");
 
         $get_crawlered_url_num = $this->get_crawlered_url_num();
-        Log::info("Collected pages: {$get_crawlered_url_num} ");
+        Log::info("crawlered pages: {$get_crawlered_url_num} ");
 
         // 先进先出
         $link = $this->queue_rpop();
         $link = $this->link_decompression($link);
         $url = $link['url'];
         // var_dump($link);
-        $this->incr_crawlered_url_num();
 
         $page_time_start = microtime(true);
 
@@ -193,10 +275,60 @@ class Crawler
                 'try_num'      => $link['try_num'],
                 'max_try'      => $link['max_try'],
                 'depth'        => $link['depth'],
-                // 'taskid'       => self::$taskid,
+                'taskid'       => self::$task_id,
             ],
         ];
         unset($html);
+
+        // =========================回调函数=========================
+        
+        // 在一个网页下载完成之后调用. 主要用来对下载的网页进行处理.
+        // 比如下载了某个网页, 希望向网页的body中添加html标签
+        if ($this->html_download_page) {
+            $return = call_user_func($this->html_download_page, $page, $this);
+            if (isset($return)) $page = $return;
+        }
+
+        // 是否从当前页面分析提取URL
+        // 回调函数如果返回false表示不需要再从此网页中发现待爬url
+        $is_find_url = true;
+        if ($link['url_type'] == 'entry_page') {
+            if ($this->html_entry_page) {
+                $return = call_user_func($this->html_entry_page, $page, $page['raw'], $this);
+                if (isset($return)) $is_find_url = $return;
+            }
+        } elseif ($link['url_type'] == 'list_page') {
+            if ($this->html_list_page) {
+                $return = call_user_func($this->html_list_page, $page, $page['raw'], $this);
+                if (isset($return)) $is_find_url = $return;
+            }
+        } elseif ($link['url_type'] == 'content_page') {
+            if ($this->html_content_page) {
+                $return = call_user_func($this->html_content_page, $page, $page['raw'], $this);
+                if (isset($return)) $is_find_url = $return;
+            }
+        }
+
+        // 返回false表示不需要再从此网页中发现待爬url
+        if ($is_find_url) {
+            // 如果深度没有超过最大深度, 获取下一级URL
+            if (self::$configs['max_depth'] == 0 || $link['depth'] < self::$configs['max_depth']) {
+                // 分析提取HTML页面中的URL
+                $this->get_urls($page['raw'], $url, $link['depth'] + 1);
+            }
+        }
+
+        // 如果是内容页, 分析提取HTML页面中的字段
+        // 列表页也可以提取数据的, source_type: urlcontext, 未实现
+        if ($link['url_type'] == 'content_page') {
+            $this->get_html_fields($page['raw'], $url, $page);
+        }
+
+        // 已爬取数量加1
+        $this->incr_crawlered_url_num();
+
+        // 带爬取数量减1
+        $this->decr_crawler_url_num();
 
         // 如果深度没有超过最大深度, 获取下一级URL
         if (self::$configs['max_depth'] == 0 || $link['depth'] < self::$configs['max_depth']) 
@@ -210,7 +342,7 @@ class Crawler
         $time_run = round(microtime(true) - $page_time_start, 3);
         log::debug("Success process page {$url} in {$time_run} s");
 
-        $spider_time_run = util::time2second(intval(microtime(true) - self::$time_start));
+        $spider_time_run = Util::time2second(intval(microtime(true) - self::$time_start));
         log::info("Spider running in {$spider_time_run}");
 
         // 爬虫爬取每个网页的时间间隔, 单位: 毫秒
@@ -270,25 +402,20 @@ class Crawler
         $params = empty($link['params']) ? [] : $link['params'];
         $html = Requests::$method($url, $params);
         // 此url附加的数据不为空, 比如内容页需要列表页一些数据, 拼接到后面去
-        if ($html && !empty($link['context_data'])) 
-        {
+        if ($html && !empty($link['context_data'])) {
             $html .= $link['context_data'];
         }
 
         $http_code = Requests::$status_code;
 
-        // if ($this->on_status_code) 
-        // {
-        //     $return = call_user_func($this->on_status_code, $http_code, $url, $html, $this);
-        //     if (isset($return)) 
-        //     {
-        //         $html = $return;
-        //     }
-        //     if (!$html) 
-        //     {
-        //         return false;
-        //     }
-        // }
+        if ($this->request_status_code) {
+            $return = call_user_func($this->request_status_code, $http_code, $url, $html, $this);
+            if (isset($return)) 
+                $html = $return;
+
+            if (!$html) 
+                return false;
+        }
 
         if ($http_code != 200) {
             // 如果是301、302跳转, 抓取跳转后的网页内容
@@ -332,7 +459,7 @@ class Crawler
         // 爬取页面耗时时间
         $time_run = round(microtime(true) - $time_start, 3);
         Log::debug("Success download page {$url} in {$time_run} s");
-        // self::$crawler_succ++;
+        self::$crawler_succ++;
 
         return $html;
     }
@@ -346,19 +473,7 @@ class Crawler
      */
     public function get_urls($html, $crawler_url, $depth = 0) 
     { 
-        //--------------------------------------------------------------------------------
-        // 正则匹配出页面中的URL
-        //--------------------------------------------------------------------------------
         $urls = selector::select($html, '//a/@href');             
-        //preg_match_all("/<a.*href=[\"']{0,1}(.*)[\"']{0,1}[> \r\n\t]{1,}/isU", $html, $matchs); 
-        //$urls = [];
-        //if (!empty($matchs[1])) 
-        //{
-        //foreach ($matchs[1] as $url) 
-        //{
-        //$urls[] = str_replace(array("\"", "'",'&amp;'), array("",'','&'), $url);
-        //}
-        //}
 
         if (empty($urls)) {
             return false;
@@ -402,11 +517,199 @@ class Crawler
                     'Referer' => $crawler_url,
                 ]
             ];
-            
+
             $this->add_url($url, $options, $depth);
         }
     }
 
+
+
+    /**
+     * 分析提取HTML页面中的字段
+     * 
+     * @param mixed $html
+     * @return void
+     */
+    public function get_html_fields($html, $url, $page) 
+    {
+        $fields = $this->get_fields(self::$configs['fields'], $html, $url, $page);
+
+        if (!empty($fields)) {
+            if ($this->html_extract_page) {
+                $return = call_user_func($this->html_extract_page, $page, $fields);
+                if (!isset($return)) {
+                    log::warn("html_extract_page return value can't be empty");
+                } elseif (!is_array($return)) {
+                    log::warn("html_extract_page return value must be an array");
+                } else {
+                    $fields = $return;
+                }
+            }
+
+            if (isset($fields) && is_array($fields)) {
+                $fields_num = $this->incr_fields_num();
+                if (self::$configs['max_fields'] != 0 && $fields_num > self::$configs['max_fields']) {
+                    exit(0);
+                }
+
+                if (version_compare(PHP_VERSION,'5.4.0','<')) {
+                    $fields_str = json_encode($fields);
+                    $fields_str = preg_replace_callback( "#\\\u([0-9a-f]{4})#i", function($matchs) {
+                        return iconv('UCS-2BE', 'UTF-8', pack('H4', $matchs[1]));
+                    }, $fields_str ); 
+                } else {
+                    $fields_str = json_encode($fields, JSON_UNESCAPED_UNICODE);
+                }
+
+                if (Util::is_win()) {
+                    $fields_str = mb_convert_encoding($fields_str, 'gb2312', 'utf-8');
+                }
+
+                log::info("Result[{$fields_num}]: ".$fields_str);
+
+                // 如果设置了导出选项
+                if (!empty(self::$configs['export'])) {
+                    self::$export_type = isset(self::$configs['export']['type']) ? self::$configs['export']['type'] : '';
+                    if (self::$export_type == 'csv') {
+                        Util::put_file(self::$export_file, Util::format_csv($fields)."\n", FILE_APPEND);
+                    } elseif (self::$export_type == 'sql') {
+                        $sql = Db::insert(self::$export_table, $fields, true);
+                        Util::put_file(self::$export_file, $sql.";\n", FILE_APPEND);
+                    } elseif (self::$export_type == 'db') {
+                        Db::insert(self::$export_table, $fields);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 根据配置提取HTML代码块中的字段
+     * 
+     * @param mixed $confs
+     * @param mixed $html
+     * @param mixed $page
+     * @return void
+     */
+    public function get_fields($confs, $html, $url, $page) 
+    {
+        $fields = [];
+        foreach ($confs as $conf) {
+            // 当前field抽取到的内容是否是有多项
+            $repeated = isset($conf['repeated']) && $conf['repeated'] ? true : false;
+            // 当前field抽取到的内容是否必须有值
+            $required = isset($conf['required']) && $conf['required'] ? true : false;
+
+            if (empty($conf['name'])) {
+                log::error("The field name is null, please check your \"fields\" and add the name of the field\n");
+                exit;
+            }
+
+            $values = [];
+            // 如果定义抽取规则
+            if (!empty($conf['selector'])) {
+                // 如果这个field是上一个field的附带连接
+                if (isset($conf['source_type']) && $conf['source_type']=='attached_url') {
+                    // 取出上个field的内容作为连接, 内容分页是不进队列直接下载网页的
+                    if (!empty($fields[$conf['attached_url']])) {
+                        $crawler_url = $this->fill_url($fields[$conf['attached_url']], $url);
+                        //log::debug("Find attached content page: {$crawler_url}");
+                        $link['url'] = $crawler_url;
+                        $link = $this->link_uncompress($link);
+                        requests::$input_encoding = null;
+                        $html = $this->request_url($crawler_url, $link);
+                        // 在一个attached_url对应的网页下载完成之后调用. 主要用来对下载的网页进行处理.
+                        if ($this->html_download_attached_page) {
+                            $return = call_user_func($this->html_download_attached_page, $html, $this);
+                            if (isset($return)) {
+                                $html = $return;
+                            }
+                        }
+
+                        // 请求获取完分页数据后把连接删除了 
+                        unset($fields[$conf['attached_url']]);
+                    }
+                }
+
+                // 没有设置抽取规则的类型 或者 设置为 xpath
+                if (!isset($conf['selector_type']) || $conf['selector_type']=='xpath') 
+                    $values = $this->get_fields_xpath($html, $conf['selector'], $conf['name']);
+                elseif ($conf['selector_type']=='css') 
+                    $values = $this->get_fields_css($html, $conf['selector'], $conf['name']);
+                elseif ($conf['selector_type']=='regex') 
+                    $values = $this->get_fields_regex($html, $conf['selector'], $conf['name']);
+                
+                // field不为空而且存在子配置
+                if (!empty($values) && !empty($conf['children'])) {
+                    $child_values = [];
+                    // 父项抽取到的html作为子项的提取内容
+                    foreach ($values as $html) {
+                        // 递归调用本方法, 所以多少子项目都支持
+                        $child_value = $this->get_fields($conf['children'], $html, $url, $page);
+                        if (!empty($child_value)) {
+                            $child_values[] = $child_value;
+                        }
+                    }
+                    // 有子项就存子项的数组, 没有就存HTML代码块
+                    if (!empty($child_values)) {
+                        $values = $child_values;
+                    }
+                }
+            }
+
+            if (empty($values)) {
+                // 如果值为空而且值设置为必须项, 跳出foreach循环
+                if ($required) {
+                    // 清空整个 fields
+                    // $fields[$conf['name']] = [];
+                    break;
+                }
+                // 避免内容分页时attached_url拼接时候string + array了
+                $fields[$conf['name']] = '';
+                //$fields[$conf['name']] = [];
+            } else {
+                if (is_array($values)) {
+                    if ($repeated) {
+                        $fields[$conf['name']] = $values;
+                    } else {
+                        $fields[$conf['name']] = $values[0];
+                    }
+                } else {
+                    $fields[$conf['name']] = $values;
+                }
+            }
+        }
+
+        if (!empty($fields)) {
+            foreach ($fields as $fieldname => $data) {
+                $pattern = "/<img.*src=[\"']{0,1}(.*)[\"']{0,1}[> \r\n\t]{1,}/isU";
+                /*$pattern = "/<img.*?src=[\'|\"](.*?(?:[\.gif|\.jpg|\.jpeg|\.png]))[\'|\"].*?[\/]?>/i"; */
+                // 在抽取到field内容之后调用, 对其中包含的img标签进行回调处理
+                if ($this->html_handle_img && preg_match($pattern, $data)) {
+                    $return = call_user_func($this->html_handle_img, $fieldname, $data);
+                    if (!isset($return)) {
+                        log::warn("html_handle_img return value can't be empty\n");
+                    } else {
+                        // 有数据才会执行 html_handle_img 方法, 所以这里不要被替换没了
+                        $data = $return;
+                    }
+                }
+
+                // 当一个field的内容被抽取到后进行的回调, 在此回调中可以对网页中抽取的内容作进一步处理
+                if ($this->html_extract_field) {
+                    $return = call_user_func($this->html_extract_field, $fieldname, $data, $page);
+                    if (!isset($return)) {
+                        log::warn("html_extract_field return value can't be empty\n");
+                    } else {
+                        // 有数据才会执行 html_extract_field 方法, 所以这里不要被替换没了
+                        $fields[$fieldname] = $return;
+                    }
+                }
+            }
+        }
+
+        return $fields;
+    }
 
 
 
@@ -523,7 +826,7 @@ class Crawler
 
         $link               =   $option;
         $link['url']        =   $url;
-        $link['url_type']   =   'entry_url';
+        $link['url_type']   =   'entry_page';
         $link               =   $this->link_decompression($link);
 
         if ($this->is_list_page($url)) {
@@ -538,7 +841,7 @@ class Crawler
 
         if ($status) {
             if ($link['url_type'] == 'entry_page')
-                Log::debug(self::$pid."Find scan page: {$url}");
+                Log::debug(self::$pid."Find entry page: {$url}");
             elseif ($link['url_type'] == 'list_page')
                 Log::debug(self::$pid."Find list page: {$url}");
             elseif ($link['url_type'] == 'content_page')
@@ -571,7 +874,7 @@ class Crawler
 
         if ($status) {
             if ($link['url_type'] == 'entry_page') {
-                Log::debug(self::$pid."Find scan page: {$url}");
+                Log::debug(self::$pid."Find entry page: {$url}");
             } elseif ($link['url_type'] == 'list_page') {
                 Log::debug(self::$pid."Find list page: {$url}");
             } elseif ($link['url_type'] == 'content_page') {
@@ -731,7 +1034,10 @@ class Crawler
                 $link = json_encode($link);
                 Queue::lpush("crawler_queue", $link);
                 $status = true;
+            } else {
+            	// echo $url.PHP_EOL;
             }
+
             // 解锁
             Queue::unlock($lock);
         }
@@ -756,12 +1062,10 @@ class Crawler
         $key    =   "crawler_urls-".md5($url);
         $lock   =   "lock-".$key;
         // 加锁: 一个进程一个进程轮流处理
-        if (Queue::lock($lock))
-        {
+        if (Queue::lock($lock)) {
             $exists = Queue::exists($key);
             // 不存在或者当然URL可重复入
-            if (!$exists || $allow_repeat)
-            {
+            if (!$exists || $allow_repeat) {
                 // 待爬取网页记录数加一
                 Queue::incr("crawler_urls_num");
                 // 先标记为待爬取网页
@@ -770,6 +1074,8 @@ class Crawler
                 $link = json_encode($link);
                 Queue::rpush("crawler_queue", $link);
                 $status = true;
+            } else {
+            	// echo $url.PHP_EOL;
             }
             // 解锁
             Queue::unlock($lock);
@@ -777,6 +1083,7 @@ class Crawler
 
         return $status;
     }
+
 
     /**
      * 左侧取出  后进先出
@@ -840,6 +1147,17 @@ class Crawler
         return $depth_num ? $depth_num : 0;
     }
 
+    protected function decr_crawler_url_num()
+    {
+    	$lock = "lock-crawler_urls_num";
+        // 锁2秒
+        if (Queue::lock($lock, time(), 2)) {
+            Queue::decr('crawler_urls_num');
+
+            Queue::unlock($lock);
+        }
+    }
+
 
     /**
      * 获取等待爬取页面数量
@@ -876,5 +1194,518 @@ class Crawler
     {
         Queue::incr("crawlered_urls_num");
     }
+
+
+        /**
+     * 采用xpath分析提取字段
+     * 
+     * @param mixed $html
+     * @param mixed $selector
+     * @return void
+     */
+    public function get_fields_xpath($html, $selector, $fieldname) 
+    {
+        $result = selector::select($html, $selector);
+
+        if (selector::$error) 
+            log::error("Field(\"{$fieldname}\") ".selector::$error."\n");
+
+        return $result;
+    }
+
+    /**
+     * 采用正则分析提取字段
+     * 
+     * @param mixed $html
+     * @param mixed $selector
+     * @return void
+     */
+    public function get_fields_regex($html, $selector, $fieldname) 
+    {
+        $result = selector::select($html, $selector, 'regex');
+        if (selector::$error) 
+        {
+            log::error("Field(\"{$fieldname}\") ".selector::$error."\n");
+        }
+        return $result;
+    }
+
+    /**
+     * 采用CSS选择器提取字段
+     * 
+     * @param mixed $html
+     * @param mixed $selector
+     * @param mixed $fieldname
+     * @return void
+     */
+    public function get_fields_css($html, $selector, $fieldname) 
+    {
+        $result = selector::select($html, $selector, 'css');
+        if (selector::$error) 
+        {
+            log::error("Field(\"{$fieldname}\") ".selector::$error."\n");
+        }
+        return $result;
+    }
+
+    /**
+     * 提取到的field数目加一
+     * 
+     * @return void
+     */
+    public function incr_fields_num()
+    {
+        $fields_num = Queue::incr("fields_num"); 
+        
+        return $fields_num;
+    }
+
+    /**
+     * 提取到的field数目
+     * 
+     * @return void
+     */
+    public function get_fields_num()
+    {
+        $fields_num = Queue::get("fields_num"); 
+        return $fields_num ? $fields_num : 0;
+    }
+
+
+    /**
+     * 验证导出
+     * 
+     * @return void
+     */
+    public function check_export()
+    {
+        // 如果设置了导出选项
+        if (!empty(self::$configs['export'])) {
+            if (self::$export_type == 'csv') {
+                if (empty(self::$export_file)) {
+                    log::error("Export data into CSV files need to Set the file path.");
+                    exit;
+                }
+            } elseif (self::$export_type == 'sql') {
+                if (empty(self::$export_file)) {
+                    log::error("Export data into SQL files need to Set the file path.");
+                    exit;
+                }
+            } elseif (self::$export_type == 'db') {
+                if (!function_exists('mysqli_connect')) {
+                    log::error("Export data to a database need Mysql support, Error: Unable to load mysqli extension.");
+                    exit;
+                }
+
+                if (empty(self::$export_db_config)) {
+                    log::error("Export data to a database need Mysql support, Error: You not set a config array for connect.\nPlease check the configuration file config/inc_config.php");
+                    exit;
+                }
+
+                $config = self::$export_db_config;
+                @mysqli_connect($config['host'], $config['user'], $config['pass'], $config['name'], $config['port']);
+                if(mysqli_connect_errno()) {
+                    log::error("Export data to a database need Mysql support, Error: ".mysqli_connect_error()." \nPlease check the configuration file config/inc_config.php");
+                    exit;
+                }
+
+                Db::_init_mysql(self::$export_db_config);
+
+                if (!Db::table_exists(self::$export_table)) {
+                    log::error("Table ".self::$export_table." does not exist");
+                    exit;
+                }
+            }
+        }
+    }
+
+    public function check_cache()
+    {
+
+        //if (Queue::exists("crawler_queue")) 
+        $keys = Queue::keys("*"); 
+        $count = count($keys);
+        $count;
+        if ($count != 0) {
+            // After this operation, 4,318 kB of additional disk space will be used.
+            // Do you want to continue? [Y/n] 
+            //$msg = "发现Redis中有采集数据, 是否继续执行, 不继续则清空Redis数据重新采集\n";
+            $msg = "Found that the data of Redis, no continue will empty Redis data start again\n";
+            $msg .= "Do you want to continue? [Y/n]";
+            fwrite(STDOUT, $msg);
+            $arg = strtolower(trim(fgets(STDIN)));
+            $arg = empty($arg) || !in_array($arg, array('y','n')) ? 'y' : $arg;
+            if ($arg == 'n') {
+                foreach ($keys as $key) {
+                    $key = str_replace($GLOBALS['config']['redis']['prefix'].":", "", $key);
+                    Queue::del($key);
+                }
+            }
+        }
+    }
+
+
+    /**
+     * Run as deamon mode.
+     *
+     * @throws Exception
+     */
+    protected static function daemonize()
+    {
+        if (!self::$daemonize) {
+            return;
+        }
+
+        // fork前一定要关闭redis
+        Queue::close();
+
+        umask(0);
+        $pid = pcntl_fork();
+        if (-1 === $pid) {
+            throw new Exception('fork fail');
+        } elseif ($pid > 0) {
+            exit(0);
+        }
+
+        if (-1 === posix_setsid()) {
+            throw new Exception("setsid fail");
+        }
+
+        // Fork again avoid SVR4 system regain the control of terminal.
+        $pid = pcntl_fork();
+        if (-1 === $pid) {
+            throw new Exception("fork fail");
+        } elseif (0 !== $pid) {
+            exit(0);
+        }
+    }
+
+
+    /**
+     * 设置任务状态, 主进程和子进程每成功采集一个页面后调用
+     */
+    public function set_task_status()
+    {
+        // 每采集成功一个页面, 生成当前进程状态到文件, 供主进程使用
+        $mem = round(memory_get_usage(true)/(1024*1024),2);
+        $use_time = microtime(true) - self::$time_start; 
+        $speed = round((self::$crawler_succ + self::$crawler_fail) / $use_time, 2);
+        $status = [
+            'id' => self::$task_id,
+            'pid' => $this->get_pid(),
+            'mem' => $mem,
+            'crawler_succ' => self::$crawler_succ,
+            'crawler_fail' => self::$crawler_fail,
+            'speed' => $speed,
+        ];
+
+        $task_status = json_encode($status);
+
+        $key = "server-".self::$serverid."-task_status-".self::$task_id;
+        Queue::set($key, $task_status); 
+    }
+
+
+	/**
+     * 删除任务状态
+     * 
+     * @return void
+     */
+    public function del_task_status($serverid, $taskid)
+    {
+        $key = "server-{$serverid}-task_status-{$taskid}";
+        Queue::del($key); 
+    }
+
+    /**
+     * 获得任务状态, 主进程才会调用
+     * 
+     * @return void
+     */
+    public function get_task_status($serverid, $taskid)
+    {
+        $key = "server-{$serverid}-task_status-{$taskid}";
+        $task_status = Queue::get($key);
+        return $task_status;
+    }
+
+    /**
+     * 获得任务状态, 主进程才会调用
+     * 
+     * @return void
+     */
+    public function get_task_status_list($serverid = 1, $tasknum)
+    {
+        $task_status = [];
+        for ($i = 1; $i <= $tasknum; $i++) {
+            $key = "server-{$serverid}-task_status-".$i;
+            $task_status[] = Queue::get($key);
+        }
+        
+        return $task_status;
+    }
+
+    /**
+     * 添加当前服务器信息到服务器列表
+     * 
+     * @return void
+     */
+    public function add_server_list($serverid, $tasknum)
+    {
+        // 更新服务器列表
+        $server_list_json = Queue::get("server_list");
+        $server_list = [];
+        if (!$server_list_json) {
+            $server_list[$serverid] = [
+                'serverid' => $serverid,
+                'tasknum' => $tasknum,
+                'time' => time(),
+            ];
+        } else {
+            $server_list = json_decode($server_list_json, true);
+            $server_list[$serverid] = [
+                'serverid' => $serverid,
+                'tasknum' => $tasknum,
+                'time' => time(),
+            ];
+            ksort($server_list);
+        }
+
+        Queue::set("server_list", json_encode($server_list));
+    }
+
+    /**
+     * 从服务器列表中删除当前服务器信息
+     * 
+     * @return void
+     */
+    public function del_server_list($serverid)
+    {
+        $server_list_json = Queue::get("server_list");
+        $server_list = [];
+        if ($server_list_json) {
+            $server_list = json_decode($server_list_json, true);
+            if (isset($server_list[$serverid])) 
+                unset($server_list[$serverid]);
+
+            // 删除完当前的任务列表如果还存在，就更新一下Redis
+            if (!empty($server_list)) {
+                ksort($server_list);
+                Queue::set("server_list", json_encode($server_list));
+            }
+        }
+    }
+
+
+    /**
+     * 清空shell输出内容
+     * 
+     * @return void
+     */
+    public function clear_echo()
+    {
+        $arr = array(27, 91, 72, 27, 91, 50, 74);
+        foreach ($arr as $a) 
+        {
+            print chr($a);
+        }
+        //array_map(create_function('$a', 'print chr($a);'), array(27, 91, 72, 27, 91, 50, 74));
+    }
+
+    /**
+     * 替换shell输出内容
+     * 
+     * @param mixed $message
+     * @param mixed $force_clear_lines
+     * @return void
+     */
+    public function replace_echo($message, $force_clear_lines = NULL) 
+    {
+        static $last_lines = 0;
+
+        if(!is_null($force_clear_lines)) 
+        {
+            $last_lines = $force_clear_lines;
+        }
+
+        // 获取终端宽度
+        $toss = $status = null;
+        $term_width = exec('tput cols', $toss, $status);
+        if($status || empty($term_width)) 
+        {
+            $term_width = 64; // Arbitrary fall-back term width.
+        }
+
+        $line_count = 0;
+        foreach(explode("\n", $message) as $line) 
+        {
+            $line_count += count(str_split($line, $term_width));
+        }
+
+        // Erasure MAGIC: Clear as many lines as the last output had.
+        for($i = 0; $i < $last_lines; $i++) 
+        {
+            // Return to the beginning of the line
+            echo "\r";
+            // Erase to the end of the line
+            echo "\033[K";
+            // Move cursor Up a line
+            echo "\033[1A";
+            // Return to the beginning of the line
+            echo "\r";
+            // Erase to the end of the line
+            echo "\033[K";
+            // Return to the beginning of the line
+            echo "\r";
+            // Can be consolodated into
+            // echo "\r\033[K\033[1A\r\033[K\r";
+        }
+
+        $last_lines = $line_count;
+
+        echo $message."\n";
+    }
+
+    /**
+     * 展示启动界面, Windows 不会到这里来
+     * @return void
+     */
+    public function display_ui()
+    {
+        $loadavg = sys_getloadavg();
+        foreach ($loadavg as $k=>$v) 
+            $loadavg[$k] = round($v, 2);
+
+        $display_str = "\033[1A\n\033[K-----------------------------\033[47;30m crawler \033[0m-----------------------------\n\033[0m";
+        $run_time_str = util::time2second(time()-self::$time_start, false);
+        $display_str .= 'CRAWLER version:' . self::VERSION . "          PHP version:" . PHP_VERSION . "\n";
+        $display_str .= 'start time:'. date('Y-m-d H:i:s', self::$time_start).'   run ' . $run_time_str . " \n";
+
+        $display_str .= 'spider name: ' . self::$configs['name'] . "\n";
+        if (self::$multiserver) 
+            $display_str .= 'server id: ' . self::$serverid."\n";
+
+        $display_str .= 'worker number: ' . self::$worker_num . "\n";
+        $display_str .= 'load average: ' . implode(", ", $loadavg) . "\n";
+
+        $display_str .= $this->display_task_ui();
+
+        // if (self::$multiserver) 
+        //     $display_str .= $this->display_server_ui();
+
+        $display_str .= $this->display_crawler_ui();
+
+        // 清屏
+        //$this->clear_echo();
+        // 返回到第一行,第一列
+        //echo "\033[0;0H";
+        $display_str .= "---------------------------------------------------------------------\n";
+        $display_str .= "Press Ctrl-C to quit. Start success.";
+        // if (self::$terminate) 
+        //     $display_str .= "\n\033[33mWait for the process exits...\033[0m";
+
+        //echo $display_str;
+        $this->replace_echo($display_str);
+    }
+
+    public function display_task_ui()
+    {
+        $display_str = "-------------------------------\033[47;30m TASKS \033[0m-------------------------------\n";
+
+        $display_str .= "\033[47;30mtaskid\033[0m". str_pad('', self::$taskid_length+2-strlen('taskid')). 
+            "\033[47;30mtaskpid\033[0m". str_pad('', self::$pid_length+2-strlen('taskpid')). 
+            "\033[47;30mmemory\033[0m". str_pad('', self::$mem_length+2-strlen('memory')). 
+            "\033[47;30mcrawler succ\033[0m". str_pad('', self::$urls_length-strlen('crawler succ')). 
+            "\033[47;30mcrawler fail\033[0m". str_pad('', self::$urls_length-strlen('crawler fail')). 
+            "\033[47;30mspeed\033[0m". str_pad('', self::$speed_length+2-strlen('speed')). 
+            "\n";
+
+        // "\033[32;40m [OK] \033[0m"
+        $task_status = $this->get_task_status_list(self::$serverid, self::$worker_num);
+        foreach ($task_status as $json) {
+            $task = json_decode($json, true);
+            if (empty($task)) 
+                continue;
+
+            $display_str .= str_pad($task['id'], self::$taskid_length+2).
+                str_pad($task['pid'], self::$pid_length+2).
+                str_pad($task['mem']."MB", self::$mem_length+2). 
+                str_pad($task['crawler_succ'], self::$urls_length). 
+                str_pad($task['crawler_fail'], self::$urls_length). 
+                str_pad($task['speed']."/s", self::$speed_length+2). 
+                "\n";
+        }
+        //echo "\033[9;0H";
+        return $display_str;
+    }
+
+    public function display_server_ui()
+    {
+        $display_str = "-------------------------------\033[47;30m SERVER \033[0m------------------------------\n";
+
+        $display_str .= "\033[47;30mserver\033[0m". str_pad('', self::$server_length+2-strlen('serverid')). 
+            "\033[47;30mtasknum\033[0m". str_pad('', self::$worker_num_length+2-strlen('tasknum')). 
+            "\033[47;30mmem\033[0m". str_pad('', self::$mem_length+2-strlen('mem')). 
+            "\033[47;30mcrawler succ\033[0m". str_pad('', self::$urls_length-strlen('crawler succ')). 
+            "\033[47;30mcrawler fail\033[0m". str_pad('', self::$urls_length-strlen('crawler fail')). 
+            "\033[47;30mspeed\033[0m". str_pad('', self::$speed_length+2-strlen('speed')). 
+            "\n";
+
+        $server_list_json = Queue::get("server_list");
+        $server_list = json_decode($server_list_json, true);
+        foreach ($server_list as $server) {
+            $serverid = $server['serverid'];
+            $tasknum = $server['tasknum'];
+            $mem = 0;
+            $speed = 0;
+            $crawler_succ = $crawler_fail = 0;
+            $task_status = $this->get_task_status_list($serverid, $tasknum);
+            foreach ($task_status as $json) {
+                $task = json_decode($json, true);
+                if (empty($task)) 
+                    continue;
+
+                $mem += $task['mem'];
+                $speed += $task['speed'];
+                $crawler_fail += $task['crawler_fail'];
+                $crawler_succ += $task['crawler_succ'];
+            }
+
+            $display_str .= str_pad($serverid, self::$server_length).
+                str_pad($tasknum, self::$worker_num_length+2). 
+                str_pad($mem."MB", self::$mem_length+2). 
+                str_pad($crawler_succ, self::$urls_length). 
+                str_pad($crawler_fail, self::$urls_length). 
+                str_pad($speed."/s", self::$speed_length+2). 
+                "\n";
+        }
+        return $display_str;
+    }
+
+    public function display_crawler_ui()
+    {
+        $display_str = "---------------------------\033[47;30m crawler STATUS \033[0m--------------------------\n";
+
+        $display_str .= "\033[47;30mfind pages\033[0m". str_pad('', 16-strlen('find pages')). 
+            "\033[47;30mqueue\033[0m". str_pad('', 14-strlen('queue')). 
+            "\033[47;30mcrawlered\033[0m". str_pad('', 15-strlen('crawlered')). 
+            "\033[47;30mfields\033[0m". str_pad('', 15-strlen('fields')). 
+            "\033[47;30mdepth\033[0m". str_pad('', 12-strlen('depth')). 
+            "\n";
+
+        $crawler   = $this->get_crawler_url_num();
+        $crawlered = $this->get_crawlered_url_num();
+        $queue     = $this->queue_lsize();
+        $fields    = $this->get_fields_num();
+        $depth     = $this->get_depth_num();
+        $display_str .= str_pad($crawler, 16);
+        $display_str .= str_pad($queue, 14);
+        $display_str .= str_pad($crawlered, 15);
+        $display_str .= str_pad($fields, 15);
+        $display_str .= str_pad($depth, 12);
+        $display_str .= "\n";
+        return $display_str;
+    }
+
 
 }
