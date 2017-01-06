@@ -26,12 +26,10 @@ class Util
     public static function lock($lock_name, $lock_timeout = 600)
     {
         $lock = util::get_file(PATH_DATA."/lock/{$lock_name}.lock");
-        if ($lock)
-        {
+        if ($lock) {
             $time = time() - $lock;
             // 还没到10分钟，说明进程还活着
-            if ($time < $lock_timeout)
-            {
+            if ($time < $lock_timeout) {
                 return true;
             }
             unlink(PATH_DATA."/lock/{$lock_name}.lock");
@@ -47,48 +45,38 @@ class Util
 
     public static function time2second($time, $is_log = true)
     {
-        if(is_numeric($time))
-        {
-            $value = array(
+        if(is_numeric($time)) {
+            $value = [
                 "years" => 0, "days" => 0, "hours" => 0,
                 "minutes" => 0, "seconds" => 0,
-            );
-            if($time >= 31556926)
-            {
+            ];
+            if($time >= 31556926) {
                 $value["years"] = floor($time/31556926);
                 $time = ($time%31556926);
             }
-            if($time >= 86400)
-            {
+            if($time >= 86400) {
                 $value["days"] = floor($time/86400);
                 $time = ($time%86400);
             }
-            if($time >= 3600)
-            {
+            if($time >= 3600) {
                 $value["hours"] = floor($time/3600);
                 $time = ($time%3600);
             }
-            if($time >= 60)
-            {
+            if($time >= 60) {
                 $value["minutes"] = floor($time/60);
                 $time = ($time%60);
             }
             $value["seconds"] = floor($time);
             //return (array) $value;
             //$t = $value["years"] ."y ". $value["days"] ."d ". $value["hours"] ."h ". $value["minutes"] ."m ".$value["seconds"]."s";
-            if ($is_log)
-            {
+            if ($is_log) {
                 $t = $value["days"] ."d ". $value["hours"] ."h ". $value["minutes"] ."m ".$value["seconds"]."s";
-            }
-            else
-            {
+            } else {
                 $t = $value["days"] ." days ". $value["hours"] ." hours ". $value["minutes"] ." minutes";
             }
-            return $t;
 
-        }
-        else
-        {
+            return $t;
+        } else {
             return false;
         }
     }
@@ -112,12 +100,11 @@ class Util
     {
         $line = 0 ;
         $fp = fopen($filepath , 'r');
-        if (!$fp)
-        {
+        if (!$fp) {
             return 0;
         }
         //获取文件的一行内容，注意：需要php5才支持该函数；
-        while( stream_get_line($fp,8192,"\n") ){
+        while( stream_get_line($fp,8192,"\n") ) {
             $line++;
         }
         fclose($fp);//关闭文件
@@ -209,8 +196,7 @@ class Util
     public static function rand_num($num = 7)
     {
         $rand = "";
-        for ($i = 0; $i < $num; $i ++)
-        {
+        for ($i = 0; $i < $num; $i ++) {
             $rand .= mt_rand(0, 9);
         }
         return $rand;
@@ -226,8 +212,7 @@ class Util
     {
         $chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
         $string = "";
-        for ($i = 0; $i < $num; $i ++)
-        {
+        for ($i = 0; $i < $num; $i ++) {
             $string .= substr($chars, rand(0, strlen($chars)), 1);
         }
         return $string;
@@ -251,55 +236,42 @@ class Util
         $restr = '';
         $str = trim($str);
         $slen = strlen($str);
-        if ($slen < 2)
-        {
+        if ($slen < 2) {
             return $str;
         }
-        if (count($pinyins) == 0)
-        {
+        if (count($pinyins) == 0) {
             $fp = fopen(PATH_DATA . '/pinyin.dat', 'r');
-            while (!feof($fp))
-            {
+            while (!feof($fp)) {
                 $line = trim(fgets($fp));
                 $pinyins[$line[0] . $line[1]] = substr($line, 3, strlen($line) - 3);
             }
             fclose($fp);
         }
-        for ($i = 0; $i < $slen; $i ++)
-        {
-            if (ord($str[$i]) > 0x80)
-            {
+        for ($i = 0; $i < $slen; $i ++) {
+            if (ord($str[$i]) > 0x80) {
                 $c = $str[$i] . $str[$i + 1];
                 $i ++;
-                if (isset($pinyins[$c]))
-                {
-                    if ($ishead == 0)
-                    {
+                if (isset($pinyins[$c])) {
+                    if ($ishead == 0) {
                         $restr .= $pinyins[$c];
-                    }
-                    else
-                    {
+                    } else {
                         $restr .= $pinyins[$c][0];
                     }
-                }
-                else
-                {
+                } else {
                     // $restr .= "_";
                 }
             }
-            else if (preg_match("/[a-z0-9]/i", $str[$i]))
-            {
+            else if (preg_match("/[a-z0-9]/i", $str[$i])) {
                 $restr .= $str[$i];
-            }
-            else
-            {
+            } else {
                 // $restr .= "_";
             }
         }
-        if ($isclose == 0)
-        {
+
+        if ($isclose == 0) {
             unset($pinyins);
         }
+
         return $restr;
     }
 
@@ -359,8 +331,7 @@ class Util
      */
     public static function get_file($url, $timeout = 10)
     {
-        if (function_exists('curl_init'))
-        {
+        if (function_exists('curl_init')) {
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
             curl_setopt($ch, CURLOPT_HEADER, 0);
@@ -383,24 +354,18 @@ class Util
     public static function put_file($file, $content, $flag = 0)
     {
         $pathinfo = pathinfo($file);
-        if (!empty($pathinfo['dirname']))
-        {
-            if (file_exists($pathinfo['dirname']) === false)
-            {
-                if (@mkdir($pathinfo['dirname'], 0777, true) === false)
-                {
+        if (!empty($pathinfo['dirname'])) {
+            if (file_exists($pathinfo['dirname']) === false) {
+                if (@mkdir($pathinfo['dirname'], 0777, true) === false) {
                     return false;
                 }
             }
         }
-        if ($flag === FILE_APPEND)
-        {
+        if ($flag === FILE_APPEND) {
             // 多个php-fpm写一个文件的时候容易丢失，要加锁
             //return @file_put_contents($file, $content, FILE_APPEND|LOCK_EX);
             return @file_put_contents($file, $content, FILE_APPEND);
-        }
-        else
-        {
+        } else {
             return @file_put_contents($file, $content, LOCK_EX);
         }
     }
@@ -416,16 +381,14 @@ class Util
     public static function path_exists($path)
     {
         $pathinfo = pathinfo($path . '/tmp.txt');
-        if (!empty($pathinfo['dirname']))
-        {
-            if (file_exists($pathinfo['dirname']) === false)
-            {
-                if (mkdir($pathinfo['dirname'], 0777, true) === false)
-                {
+        if (!empty($pathinfo['dirname'])) {
+            if (file_exists($pathinfo['dirname']) === false) {
+                if (mkdir($pathinfo['dirname'], 0777, true) === false) {
                     return false;
                 }
             }
         }
+
         return $path;
     }
 
@@ -439,17 +402,12 @@ class Util
     {
         //先删除目录下的文件：
         $dh = opendir($dir);
-        while ($file = readdir($dh))
-        {
-            if($file!="." && $file!="..")
-            {
+        while ($file = readdir($dh)) {
+            if($file!="." && $file!="..") {
                 $fullpath = $dir."/".$file;
-                if(!is_dir($fullpath))
-                {
+                if(!is_dir($fullpath)) {
                     unlink($fullpath);
-                }
-                else
-                {
+                } else {
                     self::deldir($fullpath);
                 }
             }
@@ -457,12 +415,9 @@ class Util
 
         closedir($dh);
         //删除当前文件夹：
-        if(rmdir($dir))
-        {
+        if(rmdir($dir)) {
             return true;
-        }
-        else
-        {
+        } else {
             return false;
         }
     }
@@ -476,27 +431,19 @@ class Util
      */
     public static function chmodr($path, $filemode)
     {
-        if (!is_dir($path))
-        {
+        if (!is_dir($path)) {
             return @chmod($path, $filemode);
         }
 
         $dh = opendir($path);
-        while (($file = readdir($dh)) !== false)
-        {
-            if ($file != '.' && $file != '..')
-            {
+        while (($file = readdir($dh)) !== false) {
+            if ($file != '.' && $file != '..') {
                 $fullpath = $path . '/' . $file;
-                if (is_link($fullpath))
-                {
+                if (is_link($fullpath)) {
                     return FALSE;
-                }
-                elseif (!is_dir($fullpath) && !@chmod($fullpath, $filemode))
-                {
+                } elseif (!is_dir($fullpath) && !@chmod($fullpath, $filemode)) {
                     return FALSE;
-                }
-                elseif (!self::chmodr($fullpath, $filemode))
-                {
+                } elseif (!self::chmodr($fullpath, $filemode)) {
                     return FALSE;
                 }
             }
@@ -504,12 +451,9 @@ class Util
 
         closedir($dh);
 
-        if (@chmod($path, $filemode))
-        {
+        if (@chmod($path, $filemode)) {
             return TRUE;
-        }
-        else
-        {
+        } else {
             return FALSE;
         }
     }
@@ -522,8 +466,7 @@ class Util
      */
     public static function format_csv($data)
     {
-        foreach ($data as $k=>$v)
-        {
+        foreach ($data as $k=>$v) {
             $v = str_replace(",", "", $v);
             $v = str_replace("，", "", $v);
             $data[$k] = $v;
@@ -539,13 +482,9 @@ class Util
     public static function is_utf8($str)
     {
         if ($str === mb_convert_encoding(mb_convert_encoding($str, "UTF-32", "UTF-8"), "UTF-8", "UTF-32"))
-        {
             return true;
-        }
         else
-        {
             return false;
-        }
     }
 
     /**
@@ -580,11 +519,10 @@ class Util
     public static function cn_strtotime($dtime)
     {
         if (!preg_match("/[^0-9]/", $dtime))
-        {
             return $dtime;
-        }
+
         $dtime = trim($dtime);
-        $dt = Array(1970, 1, 1, 0, 0, 0);
+        $dt = [1970, 1, 1, 0, 0, 0];
         $dtime = preg_replace("/[\r\n\t]|日|秒/", " ", $dtime);
         $dtime = str_replace("年", "-", $dtime);
         $dtime = str_replace("月", "-", $dtime);
@@ -594,40 +532,31 @@ class Util
         $ds = explode(" ", $dtime);
         $ymd = explode("-", $ds[0]);
         if (!isset($ymd[1]))
-        {
             $ymd = explode(".", $ds[0]);
-        }
+
         if (isset($ymd[0]))
-        {
             $dt[0] = $ymd[0];
-        }
+
         if (isset($ymd[1])) $dt[1] = $ymd[1];
         if (isset($ymd[2])) $dt[2] = $ymd[2];
         if (strlen($dt[0]) == 2) $dt[0] = '20' . $dt[0];
-        if (isset($ds[1]))
-        {
+        if (isset($ds[1])) {
             $hms = explode(":", $ds[1]);
             if (isset($hms[0])) $dt[3] = $hms[0];
             if (isset($hms[1])) $dt[4] = $hms[1];
             if (isset($hms[2])) $dt[5] = $hms[2];
         }
-        foreach ($dt as $k => $v)
-        {
+        foreach ($dt as $k => $v) {
             $v = preg_replace("/^0{1,}/", '', trim($v));
-            if ($v == '')
-            {
+            if ($v == '') {
                 $dt[$k] = 0;
             }
         }
         $mt = mktime($dt[3], $dt[4], $dt[5], $dt[1], $dt[2], $dt[0]);
         if (!empty($mt))
-        {
             return $mt;
-        }
         else
-        {
             return strtotime($dtime);
-        }
     }
 
     public static function cn_substr($string, $length = 80, $etc = '...', $count_words = true)
@@ -636,23 +565,17 @@ class Util
         if ($length == 0) return '';
         if (strlen($string) <= $length) return $string;
         preg_match_all("/[\x01-\x7f]|[\xc2-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xef][\x80-\xbf][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf][\x80-\xbf]|[\xf1-\xf7][\x80-\xbf][\x80-\xbf][\x80-\xbf]/", $string, $info);
-        if ($count_words)
-        {
+        if ($count_words) {
             $j = 0;
             $wordscut = "";
-            for ($i = 0; $i < count($info[0]); $i ++)
-            {
+            for ($i = 0; $i < count($info[0]); $i ++) {
                 $wordscut .= $info[0][$i];
-                if (ord($info[0][$i]) >= 128)
-                {
+                if (ord($info[0][$i]) >= 128) {
                     $j = $j + 2;
-                }
-                else
-                {
+                } else {
                     $j = $j + 1;
                 }
-                if ($j >= $length)
-                {
+                if ($j >= $length) {
                     return $wordscut . $etc;
                 }
             }
@@ -681,31 +604,22 @@ class Util
     public static function getrealurl($url)
     {
         if (empty($url))
-        {
             return $url;
-        }
+
         $header = get_headers($url, 1);
         if (empty($header[0]) || empty($header[1]))
-        {
             return $url;
-        }
-        if (strpos($header[0], '301') || strpos($header[0], '302'))
-        {
-            if (empty($header['Location']))
-            {
+
+        if (strpos($header[0], '301') || strpos($header[0], '302')) {
+            if (empty($header['Location'])) {
                 return $url;
             }
-            if (is_array($header['Location']))
-            {
+            if (is_array($header['Location'])) {
                 return $header['Location'][count($header['Location']) - 1];
-            }
-            else
-            {
+            } else {
                 return $header['Location'];
             }
-        }
-        else
-        {
+        } else {
             return $url;
         }
     }
@@ -717,8 +631,7 @@ class Util
         $headerlen = 10;
         $extralen = 0;
         $filenamelen = 0;
-        if ($flags & 4)
-        {
+        if ($flags & 4) {
             $extralen = unpack('v', substr($data, 10, 2));
             $extralen = $extralen[1];
             $headerlen += 2 + $extralen;
@@ -753,43 +666,32 @@ class Util
 
         // 小数部分
         if ($dec['0'] > 0)
-        {
             $retval .= "{$char[$dec['0']]}角";
-        }
+
         if ($dec['1'] > 0)
-        {
             $retval .= "{$char[$dec['1']]}分";
-        }
 
         // 整数部分
-        if ($num > 0)
-        {
+        if ($num > 0) {
             $retval = "元" . $retval;
             $f = 1;
             $str = strrev(intval($num));
-            for ($i = 0, $c = strlen($str); $i < $c; $i ++)
-            {
+            for ($i = 0, $c = strlen($str); $i < $c; $i ++) {
                 if ($str[$i] > 0)
-                {
                     $f = 0;
-                }
+
                 if ($f == 1 && $str[$i] == 0)
-                {
                     $out[$i] = "";
-                }
                 else
-                {
                     $out[$i] = $char[$str[$i]];
-                }
+
                 $out[$i] .= $str[$i] != '0' ? $unit[$i % 4] : '';
+
                 if ($i > 1 and $str[$i] + $str[$i - 1] == 0)
-                {
                     $out[$i] = '';
-                }
+
                 if ($i % 4 == 0)
-                {
                     $out[$i] .= $unit[4 + floor($i / 4)];
-                }
             }
             $retval = join('', array_reverse($out)) . $retval;
         }
@@ -799,8 +701,7 @@ class Util
     public static function colorize($str, $status = "info")
     {
         $out = "";
-        switch ($status)
-        {
+        switch ($status) {
             case 'succ':
                 $out = "\033[32m";    // Blue
                 break;
@@ -826,36 +727,28 @@ class Util
     public static function node_to_array($dom, $node)
     {
         if(!is_a( $dom, 'DOMDocument' ) || !is_a( $node, 'DOMNode' ))
-        {
             return false;
-        }
 
         $array = array();
         // Discard empty nodes
         $localName = trim( $node->localName );
+
         if( empty($localName))
-        {
             return false;
-        }
+
         if( XML_TEXT_NODE == $node->nodeType )
-        {
             return $node->nodeValue;
-        }
-        foreach ($node->attributes as $attr)
-        {
+
+        foreach ($node->attributes as $attr) {
             $array['@'.$attr->localName] = $attr->nodeValue;
         }
-        foreach ($node->childNodes as $childNode)
-        {
+
+        foreach ($node->childNodes as $childNode) {
             if ( (isset($childNode->childNodes->length) && 1 == $childNode->childNodes->length) &&
-                XML_TEXT_NODE == $childNode->firstChild->nodeType )
-            {
+                XML_TEXT_NODE == $childNode->firstChild->nodeType ) {
                 $array[$childNode->localName] = $childNode->nodeValue;
-            }
-            else
-            {
-                if( false !== ($a = self::node_to_array( $dom, $childNode)))
-                {
+            } else {
+                if( false !== ($a = self::node_to_array( $dom, $childNode))) {
                     $array[$childNode->localName] = $a;
                 }
             }

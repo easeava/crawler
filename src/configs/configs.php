@@ -9,7 +9,7 @@ $GLOBALS['config']['db'] = [
 ];
 
 $GLOBALS['config']['redis'] = [
-    'host'      => '192.168.1.3',
+    'host'      => '127.0.0.1',
     'port'      => 6379,
     'pass'      => '',
     'prefix'    => 'crawler',

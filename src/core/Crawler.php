@@ -71,6 +71,10 @@ class Crawler
         self::$configs      =   $configs;
         $this->client       =   new Client();
         // self::$pid          =   posix_getpid();
+        
+        if (isset($configs['log_file'])) {
+        	Log::$log_file = SRC_PATH . DIRECTORY_SEPARATOR . "logs/{$configs["log_file"]}.log";
+        }
 	}
 
 
@@ -177,10 +181,10 @@ class Crawler
         $html = $this->request_url($url, $link);
         // echo $html;
          // 当前正在爬取的网页页面的对象
-        $page = array(
+        $page = [
             'url'     => $url,
             'raw'     => $html,
-            'request' => array(
+            'request' => [
                 'url'          => $url,
                 'method'       => $link['method'],
                 'headers'      => $link['headers'],
@@ -190,16 +194,14 @@ class Crawler
                 'max_try'      => $link['max_try'],
                 'depth'        => $link['depth'],
                 // 'taskid'       => self::$taskid,
-            ),
-        );
+            ],
+        ];
         unset($html);
 
         // 如果深度没有超过最大深度, 获取下一级URL
         if (self::$configs['max_depth'] == 0 || $link['depth'] < self::$configs['max_depth']) 
-        {
             // 分析提取HTML页面中的URL
             $this->get_urls($page['raw'], $url, $link['depth'] + 1);
-        }
 
         // 如果当前深度大于缓存的, 更新缓存
         $this->incr_depth_num($link['depth']);
@@ -213,10 +215,9 @@ class Crawler
 
         // 爬虫爬取每个网页的时间间隔, 单位: 毫秒
         if (!isset(self::$configs['interval'])) 
-        {
             // 默认睡眠100毫秒, 太快了会被认为是ddos
             self::$configs['interval'] = 100;
-        }
+
         usleep(self::$configs['interval'] * 1000);
     }
 
@@ -228,7 +229,7 @@ class Crawler
      * @param mixed $link
      * @return void
      */
-    public function request_url($url, $link = array())
+    public function request_url($url, $link = [])
     {
         $time_start = microtime(true);
 
@@ -236,45 +237,37 @@ class Crawler
 
         // 设置了编码就不要让requests去判断了
         if (isset(self::$configs['input_encoding'])) 
-        {
             Requests::$input_encoding = self::$configs['input_encoding'];
-        }
+
         // 得到的编码如果不是utf-8的要转成utf-8, 因为xpath只支持utf-8
         Requests::$output_encoding = 'utf-8';
         Requests::set_timeout(self::$configs['timeout']);
         Requests::set_useragent(self::$configs['user_agent']);
         if (self::$configs['user_agents']) 
-        {
             Requests::set_useragents(self::$configs['user_agents']);
-        }
+
         if (self::$configs['client_ip']) 
-        {
             Requests::set_client_ip(self::$configs['client_ip']);
-        }
+
         if (self::$configs['client_ips']) 
-        {
             Requests::set_client_ips(self::$configs['client_ips']);
-        }
 
         // 是否设置了代理
-        if (!empty($link['proxy'])) 
-        {
+        if (!empty($link['proxy'])) {
             Requests::set_proxies(array('http'=>$link['proxy'], 'https'=>$link['proxy']));
             // 自动切换IP
             Requests::set_header('Proxy-Switch-Ip', 'yes');
         }
 
         // 如何设置了 HTTP Headers
-        if (!empty($link['headers'])) 
-        {
-            foreach ($link['headers'] as $k=>$v) 
-            {
+        if (!empty($link['headers'])) {
+            foreach ($link['headers'] as $k=>$v) {
                 Requests::set_header($k, $v);
             }
         }
 
         $method = empty($link['method']) ? 'get' : strtolower($link['method']);
-        $params = empty($link['params']) ? array() : $link['params'];
+        $params = empty($link['params']) ? [] : $link['params'];
         $html = Requests::$method($url, $params);
         // 此url附加的数据不为空, 比如内容页需要列表页一些数据, 拼接到后面去
         if ($html && !empty($link['context_data'])) 
@@ -297,53 +290,40 @@ class Crawler
         //     }
         // }
 
-        if ($http_code != 200)
-        {
+        if ($http_code != 200) {
             // 如果是301、302跳转, 抓取跳转后的网页内容
-            if ($http_code == 301 || $http_code == 302) 
-            {
+            if ($http_code == 301 || $http_code == 302) {
                 $info = Requests::$info;
-                if (isset($info['redirect_url'])) 
-                {
+                if (isset($info['redirect_url'])) {
                     $url = $info['redirect_url'];
                     Requests::$input_encoding = null;
                     $html = $this->request_url($url, $link);
-                    if ($html && !empty($link['context_data'])) 
-                    {
+                    if ($html && !empty($link['context_data'])) {
                         $html .= $link['context_data'];
                     }
-                }
-                else 
-                {
+                } else {
                     return false;
                 }
-            }
-            else 
-            {
-                if ($http_code == 407) 
-                {
+            } else {
+                if ($http_code == 407) {
                     // 扔到队列头部去, 继续采集
                     $this->queue_rpush($link);
                     Log::error("Failed to download page {$url}");
                     self::$crawler_fail++;
-                }
-                elseif (in_array($http_code, array('0','502','503','429'))) 
-                {
+                } elseif (in_array($http_code, array('0','502','503','429'))) {
                     // 采集次数加一
                     $link['try_num']++;
                     // 抓取次数 小于 允许抓取失败次数
-                    if ( $link['try_num'] <= $link['max_try'] ) 
-                    {
+                    if ( $link['try_num'] <= $link['max_try'] ) {
                         // 扔到队列头部去, 继续采集
                         $this->queue_rpush($link);
                     }
                     Log::error("Failed to download page {$url}, retry({$link['try_num']})");
-                }
-                else 
-                {
+                } else {
                     Log::error("Failed to download page {$url}");
                     self::$crawler_fail++;
                 }
+
                 Log::error("HTTP CODE: {$http_code}");
                 return false;
             }
@@ -371,7 +351,7 @@ class Crawler
         //--------------------------------------------------------------------------------
         $urls = selector::select($html, '//a/@href');             
         //preg_match_all("/<a.*href=[\"']{0,1}(.*)[\"']{0,1}[> \r\n\t]{1,}/isU", $html, $matchs); 
-        //$urls = array();
+        //$urls = [];
         //if (!empty($matchs[1])) 
         //{
         //foreach ($matchs[1] as $url) 
@@ -380,13 +360,11 @@ class Crawler
         //}
         //}
 
-        if (empty($urls)) 
-        {
+        if (empty($urls)) {
             return false;
         }
 
-        foreach ($urls as $key=>$url) 
-        {
+        foreach ($urls as $key=>$url) {
             $urls[$key] = str_replace(array("\"", "'",'&amp;'), array("",'','&'), $url);
         }
 
@@ -395,42 +373,36 @@ class Crawler
         //--------------------------------------------------------------------------------
         // 去除重复的RUL
         $urls = array_unique($urls);
-        foreach ($urls as $k=>$url) 
-        {
+        foreach ($urls as $k=>$url) {
             $url = trim($url);
-            if (empty($url)) 
-            {
+            if (empty($url)) {
                 continue;
             }
 
             $val = $this->fill_url($url, $crawler_url);
-            if ($val) 
-            {
+            if ($val) {
                 $urls[$k] = $val;
-            }
-            else 
-            {
+            } else {
                 unset($urls[$k]);
             }
         }
 
-        if (empty($urls)) 
-        {
+        if (empty($urls)) {
             return false;
         }
 
         //--------------------------------------------------------------------------------
         // 把抓取到的URL放入队列
         //--------------------------------------------------------------------------------
-        foreach ($urls as $url) 
-        {
+        foreach ($urls as $url) {
 
             // 把当前页当做找到的url的Referer页
-            $options = array(
-                'headers' => array(
+            $options = [
+                'headers' => [
                     'Referer' => $crawler_url,
-                )
-            );
+                ]
+            ];
+            
             $this->add_url($url, $options, $depth);
         }
     }
@@ -731,10 +703,10 @@ class Crawler
     /**
      * 队列左侧插入
      * @param array $link
-     * @param bool $allowed_repeat
+     * @param bool $allow_repeat
      * @return bool
      */
-    public function queue_lpush($link = array(), $allowed_repeat = false)
+    public function queue_lpush($link = [], $allow_repeat = false)
     {
         if (empty($link) || empty($link['url']))
             return false;
@@ -750,7 +722,7 @@ class Crawler
         if (Queue::lock($lock)) {
             $exists = Queue::exists($key);
             // 不存在或者当然URL可重复入
-            if (!$exists || $allowed_repeat) {
+            if (!$exists || $allow_repeat) {
                 // 待爬取网页记录数加一
                 Queue::incr("crawler_urls_num");
                 // 先标记为待爬取网页
@@ -770,10 +742,10 @@ class Crawler
     /**
      * 队列右侧插入  先进先出规则
      * @param array $link
-     * @param bool $allowed_repeat
+     * @param bool $allow_repeat
      * @return bool
      */
-    public function queue_rpush($link = array(), $allowed_repeat = false)
+    public function queue_rpush($link = [], $allow_repeat = false)
     {
         if (empty($link) || empty($link['url']))
             return false;
@@ -788,7 +760,7 @@ class Crawler
         {
             $exists = Queue::exists($key);
             // 不存在或者当然URL可重复入
-            if (!$exists || $allowed_repeat)
+            if (!$exists || $allow_repeat)
             {
                 // 待爬取网页记录数加一
                 Queue::incr("crawler_urls_num");

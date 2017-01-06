@@ -9,6 +9,7 @@ $configs = [
     'name'      => 'u88a',
     'work_num'  => 20,
     'max_depth' =>  1,
+    'log_file'  =>  'u88',
     'dbname'    =>  'test',
     'domains'   => [
         'u88.cn',

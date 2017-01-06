@@ -12,7 +12,7 @@ class Queue
     /**
      *  redis配置数组
      */
-    protected static $configs = array();
+    protected static $configs = [];
 
     /**
      *  默认redis前缀
@@ -23,8 +23,7 @@ class Queue
 
     public static function init()
     {
-        if (!extension_loaded("redis"))
-        {
+        if (!extension_loaded("redis")) {
             self::$error = "The redis extension was not found";
             return false;
         }
@@ -77,7 +76,7 @@ class Queue
         }
     }
 
-    public static function set_connect($config = array())
+    public static function set_connect($config = [])
     {
         // 先断开原来的连接
         if ( !empty(self::$redis) )
@@ -115,7 +114,7 @@ class Queue
     {
         if (empty($GLOBALS['config']['redis']))
         {
-            return array();
+            return [];
         }
         self::$configs = $GLOBALS['config']['redis'];
         return self::$configs;
@@ -1055,7 +1054,7 @@ class Queue
         // 如果队列中有数据
         if ($queue_length > 0)
         {
-            $list = array();
+            $list = [];
             $count = ($queue_length >= $length) ? $length : $queue_length;
             for ($i = 0; $i < $count; $i++)
             {
