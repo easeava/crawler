@@ -6,7 +6,7 @@ require '../../src/main.php';
 
 $configs = [
     'name'          =>  'u88',
-    // 'daemonize' => true,
+    'daemonize' => true,
     'worker_num'    =>  10,
     'interval'      =>  10,
     'log_file'      =>  'u88',
