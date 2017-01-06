@@ -17,6 +17,7 @@ $configs = [
     'entry_urls'    =>  [
         'http://www.u88.cn/'
     ],
+    'list_url_regexes'      =>  [],
     'content_url_regexes'   =>  [
         "http://www.u88.cn/news/[a-z]+/[a-z]+/\d+\.html\.*",
     ],
