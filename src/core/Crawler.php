@@ -201,6 +201,7 @@ class Crawler
 			// sleep(1);
 			
 			if (!self::$daemonize) {
+                $this->clear_echo();
                 $this->display_ui();
 			}
 		}
