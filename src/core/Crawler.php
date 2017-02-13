@@ -226,7 +226,7 @@ class Crawler
 			self::$master 	= 	false;
 			self::$child 	=	true;
 			self::$task_id	=	$taskid;
-            self::$task_pid =   $work->pid;
+            // self::$task_pid =   $work->pid;
             self::$crawler_succ = 0;
             self::$crawler_fail = 0;
 			$this->start($work);
