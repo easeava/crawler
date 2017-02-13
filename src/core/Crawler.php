@@ -53,6 +53,7 @@ class Crawler
     protected static $child_pid		=	[];
     protected static $time_start 	=	0;
     protected static $task_id		=	0;
+    protected static $task_pid;
 
     // 导出类型配置
     public static $export_type 		= 	'';
@@ -146,6 +147,7 @@ class Crawler
         if (self::$daemonize) {
         	$this->daemonize();
         } else {
+            $this->clear_echo();
         	$this->display_ui();
         }
 
@@ -157,8 +159,8 @@ class Crawler
 	{
 		// echo self::$task_id;
 		// echo $this->get_pid();
-		self::$crawler_succ = 0;
-        self::$crawler_fail = 0;
+		// self::$crawler_succ = 0;
+  //       self::$crawler_fail = 0;
 
 		while (true) {
 			// var_dump(self::$master);
@@ -198,7 +200,7 @@ class Crawler
 			$this->set_task_status();
 			// sleep(1);
 			
-			if (self::$master && !self::$daemonize) {
+			if (!self::$daemonize) {
                 $this->display_ui();
 			}
 		}
@@ -224,6 +226,9 @@ class Crawler
 			self::$master 	= 	false;
 			self::$child 	=	true;
 			self::$task_id	=	$taskid;
+            self::$task_pid =   $work->pid;
+            self::$crawler_succ = 0;
+            self::$crawler_fail = 0;
 			$this->start($work);
 		});
 
